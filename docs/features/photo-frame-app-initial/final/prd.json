@@ -1,0 +1,455 @@
+{
+  "project": "Digital Photo Frame Android App",
+  "branchName": "ralph/photo-frame-mvp",
+  "description": "24/7 digital photo frame app for Android tablets with SMB/Samba streaming, customizable transitions, and automated scheduling",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Set up 2-module project structure",
+      "description": "As a developer, I need the base project structure with app and core modules configured.",
+      "acceptanceCriteria": [
+        "Create :app and :core Gradle modules",
+        "Configure build.gradle with Android SDK targets (API 26-34)",
+        "Set up module dependencies (app depends on core)",
+        "Add basic AndroidManifest.xml with required permissions (INTERNET, ACCESS_NETWORK_STATE, WAKE_LOCK)",
+        "Lock orientation to landscape",
+        "Project builds successfully"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add core dependencies to project",
+      "description": "As a developer, I need all required libraries configured for the app.",
+      "acceptanceCriteria": [
+        "Add Jetpack Compose dependencies (ui, material3, tooling)",
+        "Add Kotlin Coroutines and Flow dependencies",
+        "Add Hilt/Dagger dependencies with kapt configuration",
+        "Add Coil image loading library",
+        "Add jcifs-ng for SMB client (version 2.1.9+)",
+        "Add DataStore preferences dependency",
+        "Add WorkManager dependency",
+        "Add LeakCanary debug dependency",
+        "Project syncs and builds successfully"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Define immutable domain models",
+      "description": "As a developer, I need core data classes for Photo, SlideshowSettings, and SmbConnection.",
+      "acceptanceCriteria": [
+        "Create Photo data class with @Immutable annotation (path, fileName, lastModified)",
+        "Create SlideshowSettings data class (interval, transitionType, shuffleEnabled, schedule)",
+        "Create SmbConnection data class (serverAddress, sharePath, username, domain)",
+        "Create TransitionType enum (FADE, SLIDE, ZOOM_KEN_BURNS)",
+        "Create Result sealed class for error handling (Success, Error, Loading)",
+        "Add unit tests for data class copy() and equality",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement Android Keystore credential encryption",
+      "description": "As a developer, I need secure credential storage using Android Keystore API to encrypt SMB passwords.",
+      "acceptanceCriteria": [
+        "Create CredentialStore interface with encrypt() and decrypt() methods",
+        "Implement KeystoreCredentialStore using Android Keystore",
+        "Generate AES key in Keystore if not exists",
+        "Encrypt/decrypt passwords with AES/GCM/NoPadding",
+        "Add error handling for Keystore failures",
+        "Add unit tests with Robolectric for encryption round-trip",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "P0 Security Issue - BLOCKING"
+    },
+    {
+      "id": "US-005",
+      "title": "Create SettingsRepository with DataStore",
+      "description": "As a developer, I need persistent settings storage using DataStore and Keystore for credentials.",
+      "acceptanceCriteria": [
+        "Create SettingsRepository interface",
+        "Implement SettingsRepositoryImpl with DataStore Preferences",
+        "Save/load SlideshowSettings (interval, transition, schedule)",
+        "Save/load SmbConnection (server, share, username) - password encrypted via Keystore",
+        "Expose settings as StateFlow for reactive updates",
+        "Add Hilt module for dependency injection",
+        "Add unit tests with test doubles",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Create SmbClient wrapper with SMB 2.0+ enforcement",
+      "description": "As a developer, I need an SMB client that enforces secure protocols (SMB 2.0+) and provides a testable interface.",
+      "acceptanceCriteria": [
+        "Create SmbClient interface (connect, listFiles, readFile, disconnect)",
+        "Implement JcifsSmbClient wrapper around jcifs-ng library",
+        "Configure jcifs-ng to use SMB 2.0+ only (reject SMB 1.x)",
+        "Enable SMB signing for security",
+        "Add connection timeout (30 seconds)",
+        "Add error handling for authentication failures, timeouts, network errors",
+        "Extract interface to enable test doubles",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "P0 Security Issue - BLOCKING"
+    },
+    {
+      "id": "US-007",
+      "title": "Implement SmbPhotoDataSource for recursive folder scanning",
+      "description": "As a developer, I need to scan SMB shares for photos recursively with file type filtering.",
+      "acceptanceCriteria": [
+        "Create SmbPhotoDataSource class with scanFolder() suspend function",
+        "Implement recursive directory traversal using SmbClient",
+        "Filter files by extension: .jpg, .jpeg, .png, .heic (case-insensitive)",
+        "Add 30-second timeout for large collections",
+        "Return List<Photo> with file paths and metadata",
+        "Add error handling for network failures, permission denied",
+        "Add unit tests with FakeSmbClient",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Create PhotoBufferManager with 4-photo LRU cache",
+      "description": "As a developer, I need a buffer manager that preloads 4 photos for smooth transitions.",
+      "acceptanceCriteria": [
+        "Create PhotoBufferManager class with getNextPhoto() and preloadBuffer() methods",
+        "Implement LRU cache with max size of 4 photos",
+        "Preload photos in background using Dispatchers.IO",
+        "Use Mutex for thread-safe cache access",
+        "Add getCurrentPhoto(), getNextPhoto(), getPreviousPhoto() methods",
+        "Emit loading state via StateFlow",
+        "Add unit tests for buffer logic and thread safety",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement ImageCache with Coil and downsampling",
+      "description": "As a developer, I need efficient image loading with downsampling to screen resolution (2560x1600).",
+      "acceptanceCriteria": [
+        "Create ImageCache wrapper around Coil library",
+        "Configure Coil ImageLoader with disk cache (100MB)",
+        "Add custom Fetcher for SMB URLs using SmbClient",
+        "Implement downsampling to max 2560x1600 resolution",
+        "Add in-memory LRU cache (50MB)",
+        "Expose load() function returning Bitmap Flow",
+        "Add error handling for corrupt images, OOM",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Create SlideshowRepository for photo management",
+      "description": "As a developer, I need a repository that coordinates SMB scanning, buffering, and caching.",
+      "acceptanceCriteria": [
+        "Create SlideshowRepository class",
+        "Implement loadPhotos() to scan SMB share via SmbPhotoDataSource",
+        "Implement shufflePhotos() using Fisher-Yates algorithm",
+        "Integrate PhotoBufferManager for 4-photo preloading",
+        "Integrate ImageCache for image loading",
+        "Expose photo list as StateFlow",
+        "Add error handling and retry logic with exponential backoff",
+        "Add unit tests with test doubles",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Build SlideshowViewModel with auto-advance logic",
+      "description": "As a developer, I need a ViewModel that manages slideshow state and auto-advances photos at intervals.",
+      "acceptanceCriteria": [
+        "Create SlideshowViewModel with Hilt injection",
+        "Implement initialize() to load photos from SlideshowRepository",
+        "Add auto-advance timer using viewModelScope.launch with delay",
+        "Implement pause/resume slideshow functionality",
+        "Implement next/previous photo navigation",
+        "Expose StateFlow<SlideshowState> with current photo, isPlaying, error state",
+        "Add proper coroutine cancellation on ViewModel clear",
+        "Add unit tests with Turbine for Flow testing",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Build SettingsViewModel for configuration",
+      "description": "As a developer, I need a ViewModel that manages settings persistence and validation.",
+      "acceptanceCriteria": [
+        "Create SettingsViewModel with Hilt injection",
+        "Load settings from SettingsRepository on init",
+        "Implement saveSmbConnection() with input validation",
+        "Implement testSmbConnection() to validate credentials",
+        "Implement saveDisplaySettings() for interval and transition",
+        "Implement saveScheduleSettings() for daily schedule",
+        "Expose StateFlow<SettingsState> with current settings and validation errors",
+        "Add unit tests with test doubles",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Create SettingsScreen UI with Compose",
+      "description": "As a user, I want to configure SMB connection, slideshow interval, transition effects, and schedule in one screen.",
+      "acceptanceCriteria": [
+        "Create SettingsScreen Composable with Material 3 design",
+        "Add SMB configuration section (server, share, username, password)",
+        "Add Display section with interval dropdown (10s, 15s, 30s, 1min, 5min)",
+        "Add Transitions section with radio buttons (Fade, Slide, Zoom)",
+        "Add Schedule section with start/end time pickers",
+        "Add Test Connection button with loading indicator",
+        "Add Save and Cancel buttons",
+        "Display validation errors inline",
+        "Observe SettingsViewModel StateFlow and render UI",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Create SlideshowScreen UI with photo display",
+      "description": "As a user, I want to see photos displayed full-screen with scale-to-fit (letterbox/pillarbox) preserving aspect ratios.",
+      "acceptanceCriteria": [
+        "Create SlideshowScreen Composable filling entire screen",
+        "Use AsyncImage from Coil to load and display photos",
+        "Set ContentScale.Fit to preserve aspect ratio with black bars",
+        "Show loading indicator while photo loads",
+        "Show error UI with retry button on load failure",
+        "Hide system UI (status bar, navigation bar) for immersive mode",
+        "Observe SlideshowViewModel StateFlow and render current photo",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Implement Fade transition effect",
+      "description": "As a user, I want smooth cross-fade transitions between photos at 60fps.",
+      "acceptanceCriteria": [
+        "Create FadeTransition Composable using AnimatedVisibility",
+        "Implement cross-fade with tween animation (duration 800ms)",
+        "Use hardware acceleration (graphicsLayer)",
+        "Ensure 60fps by measuring frame time with Choreographer",
+        "Add transition to SlideshowScreen when photo changes",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Implement Slide transition effect",
+      "description": "As a user, I want slide/pan transitions between photos at 60fps.",
+      "acceptanceCriteria": [
+        "Create SlideTransition Composable using AnimatedContent",
+        "Implement slide animation from left/right/top/bottom (random)",
+        "Use slideIntoContainer and slideOutOfContainer",
+        "Duration 1000ms with FastOutSlowIn easing",
+        "Use hardware acceleration",
+        "Ensure 60fps rendering",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Implement Zoom/Ken Burns transition effect",
+      "description": "As a user, I want Ken Burns (slow zoom and pan) transition effects at 60fps.",
+      "acceptanceCriteria": [
+        "Create ZoomTransition Composable using animateFloatAsState",
+        "Animate scale from 1.0 to 1.2 over 8 seconds",
+        "Animate offset (pan) randomly over 8 seconds",
+        "Use hardware acceleration with graphicsLayer",
+        "Transition to next photo after animation completes",
+        "Ensure 60fps rendering",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Add swipe gesture navigation",
+      "description": "As a user, I want to swipe left/right to manually navigate photos.",
+      "acceptanceCriteria": [
+        "Add HorizontalPager or custom swipe detection to SlideshowScreen",
+        "Swipe right triggers next photo",
+        "Swipe left triggers previous photo",
+        "Pause auto-advance when user swipes",
+        "Show swipe hints on first launch",
+        "Add haptic feedback on swipe",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Implement WorkManager scheduling for daily on/off",
+      "description": "As a user, I want the slideshow to automatically start and stop at configured times each day.",
+      "acceptanceCriteria": [
+        "Create ScheduleWorker extending Worker class",
+        "Implement startSlideshow() and stopSlideshow() methods",
+        "Use WorkManager PeriodicWorkRequest for daily schedule",
+        "Use setExactAndAllowWhileIdle() for precise timing",
+        "Acquire/release WAKE_LOCK to control screen on/off",
+        "Persist across device reboots using Worker",
+        "Add logging for schedule events",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Add network failure recovery with auto-reconnect",
+      "description": "As a user, I want the app to automatically recover when SMB connection fails.",
+      "acceptanceCriteria": [
+        "Implement exponential backoff retry logic in SmbClient",
+        "Add NetworkCallback to detect WiFi state changes",
+        "Auto-reconnect when network becomes available",
+        "Show error dialog with manual retry button",
+        "Continue slideshow with buffered photos during disconnect",
+        "Add Crashlytics logging for network failures",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "P0 Reliability Issue"
+    },
+    {
+      "id": "US-021",
+      "title": "Add memory leak detection and prevention",
+      "description": "As a developer, I need to prevent memory leaks for 24/7 operation.",
+      "acceptanceCriteria": [
+        "Integrate LeakCanary in debug build",
+        "Add memory monitoring every 60 seconds in production",
+        "Implement preemptive cache clearing at 75% memory threshold",
+        "Add emergency restart at 90% memory threshold",
+        "Log memory usage metrics to Crashlytics",
+        "Add unit tests for memory threshold logic",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "P0 Reliability Issue - BLOCKING"
+    },
+    {
+      "id": "US-022",
+      "title": "Implement global exception handler for auto-recovery",
+      "description": "As a user, I want the app to automatically recover from crashes without manual intervention.",
+      "acceptanceCriteria": [
+        "Set Thread.setDefaultUncaughtExceptionHandler() in Application class",
+        "Log crash to Crashlytics before restart",
+        "Restart MainActivity automatically after crash",
+        "Preserve last slideshow state in DataStore",
+        "Resume slideshow from last position",
+        "Add crash counter to prevent restart loops (max 3 restarts/hour)",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "P0 Reliability Issue - BLOCKING"
+    },
+    {
+      "id": "US-023",
+      "title": "Add first-time setup flow with SMB configuration wizard",
+      "description": "As a new user, I want a step-by-step wizard to configure the app on first launch.",
+      "acceptanceCriteria": [
+        "Create SetupWizardScreen with 3 steps",
+        "Step 1: Welcome screen explaining the app",
+        "Step 2: SMB configuration form with test connection",
+        "Step 3: Display settings (interval, transition)",
+        "Save settings and navigate to SlideshowScreen on completion",
+        "Show wizard only if no SMB connection configured",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Add PII logging policy with custom lint rule",
+      "description": "As a developer, I need to ensure no credentials are logged to prevent security leaks.",
+      "acceptanceCriteria": [
+        "Create custom Lint rule to detect Log.d/e/i calls with 'password', 'credential', 'secret' keywords",
+        "Add LogWrapper class that filters PII from log messages",
+        "Replace all Log.* calls with LogWrapper.*",
+        "Add static analysis check to CI/CD pipeline",
+        "Document logging policy in SECURITY.md",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "P0 Security Issue - BLOCKING"
+    },
+    {
+      "id": "US-025",
+      "title": "Add Crashlytics integration for monitoring",
+      "description": "As a developer, I need real-time crash reporting and analytics for production monitoring.",
+      "acceptanceCriteria": [
+        "Add Firebase Crashlytics dependency",
+        "Initialize Crashlytics in Application class",
+        "Add custom keys for debugging (SMB server, network state, memory usage)",
+        "Add breadcrumb logging for slideshow state changes",
+        "Test crash reporting with forced crash in debug build",
+        "Configure Crashlytics dashboard alerts for crash rate >1%",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

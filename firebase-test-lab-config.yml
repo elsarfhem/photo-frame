@@ -1,0 +1,173 @@
+# Firebase Test Lab Configuration for Photo Frame App
+#
+# This configuration defines test matrix for stress testing and regular testing.
+#
+# Usage:
+# gcloud firebase test android run --config firebase-test-lab-config.yml
+
+# Stress Test Configuration (7 days)
+stress-test:
+  type: instrumentation
+  app: app/build/outputs/apk/release/app-release.apk
+  test: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+  # Test targets
+  test-targets:
+    - class com.photoframe.app.stress.SevenDayStressTest#sevenDayStressTest
+
+  # Device matrix - 5 physical tablets
+  device:
+    - model: oriole  # Google Pixel 6
+      version: 33    # Android 13
+      locale: en_US
+      orientation: landscape
+
+    - model: flame   # Google Pixel 4
+      version: 30    # Android 11
+      locale: en_US
+      orientation: landscape
+
+    - model: redfin  # Google Pixel 5
+      version: 31    # Android 12
+      locale: en_US
+      orientation: landscape
+
+    - model: blueline # Google Pixel 3
+      version: 29    # Android 10
+      locale: en_US
+      orientation: landscape
+
+    - model: crosshatch # Google Pixel 3 XL
+      version: 28    # Android 9
+      locale: en_US
+      orientation: landscape
+
+  # Test configuration
+  timeout: 170h  # 7 days + 2 hour buffer
+  results-bucket: gs://photo-frame-stress-tests
+  results-dir: stress-test-{date}
+
+  # Performance monitoring
+  record-video: true
+  performance-metrics: true
+
+  # Environment
+  environment-variables:
+    clearPackageData: true
+    coverage: true
+    coverageFile: /sdcard/coverage.ec
+
+  # Directories to pull after test
+  directories-to-pull:
+    - /sdcard
+
+  # Test runners
+  num-flaky-test-attempts: 0
+
+# Regular Test Configuration (1-2 hours)
+regular-test:
+  type: instrumentation
+  app: app/build/outputs/apk/debug/app-debug.apk
+  test: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+  # Device matrix - representative tablets
+  device:
+    - model: oriole
+      version: 33
+      locale: en_US
+      orientation: landscape
+
+    - model: flame
+      version: 30
+      locale: en_US
+      orientation: landscape
+
+  # Test configuration
+  timeout: 2h
+  results-bucket: gs://photo-frame-test-results
+  results-dir: test-{date}
+
+  # Performance monitoring
+  record-video: false
+  performance-metrics: true
+
+  # Test runners
+  num-flaky-test-attempts: 2
+
+# Performance Benchmark Configuration
+performance-test:
+  type: instrumentation
+  app: app/build/outputs/apk/release/app-release.apk
+  test: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+  # Test targets - performance tests only
+  test-targets:
+    - package com.photoframe.app.performance
+
+  # High-end devices for performance baseline
+  device:
+    - model: oriole
+      version: 33
+      locale: en_US
+      orientation: landscape
+
+  # Low-end devices for minimum performance
+    - model: walleye  # Google Pixel 2 (lower spec)
+      version: 28
+      locale: en_US
+      orientation: landscape
+
+  # Test configuration
+  timeout: 1h
+  results-bucket: gs://photo-frame-perf-results
+  results-dir: perf-{date}
+
+  # Performance monitoring
+  record-video: false
+  performance-metrics: true
+
+  # Environment
+  environment-variables:
+    clearPackageData: true
+
+# Accessibility Test Configuration
+accessibility-test:
+  type: instrumentation
+  app: app/build/outputs/apk/debug/app-debug.apk
+  test: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+  # Test targets - accessibility tests only
+  test-targets:
+    - package com.photoframe.app.accessibility
+
+  # Device matrix
+  device:
+    - model: oriole
+      version: 33
+      locale: en_US
+      orientation: landscape
+      device-features:
+        - enable-talkback
+
+  # Test configuration
+  timeout: 30min
+  results-bucket: gs://photo-frame-a11y-results
+  results-dir: a11y-{date}
+
+  # Performance monitoring
+  record-video: true
+  performance-metrics: false
+
+  # Test runners
+  num-flaky-test-attempts: 0
+
+# Cost Estimates (as of 2026)
+# - Stress Test (7 days, 5 devices): ~$100-150 per run
+# - Regular Test (2 hours, 2 devices): ~$5-10 per run
+# - Performance Test (1 hour, 2 devices): ~$3-5 per run
+# - Accessibility Test (30 min, 1 device): ~$1-2 per run
+#
+# Monthly Budget (assuming weekly stress tests + daily regular tests):
+# - 4 stress tests/month: $400-600
+# - 30 regular tests/month: $150-300
+# - Total: ~$550-900/month during active testing phase
