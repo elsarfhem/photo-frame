@@ -74,6 +74,7 @@ class SettingsViewModel @Inject constructor(
                     displayInterval = settings.displayIntervalSeconds,
                     transitionType = settings.transitionType,
                     shuffleEnabled = settings.shuffleEnabled,
+                    panAnimationEnabled = settings.panAnimationEnabled,
                     scheduleEnabled = settings.scheduleEnabled,
                     scheduleStartTime = settings.scheduleStartTime,
                     scheduleEndTime = settings.scheduleEndTime,
@@ -169,6 +170,16 @@ class SettingsViewModel @Inject constructor(
     fun toggleShuffle(enabled: Boolean) {
         _state.value = _state.value.copy(
             shuffleEnabled = enabled,
+            isModified = true
+        )
+    }
+
+    /**
+     * Toggles pan animation enabled setting.
+     */
+    fun togglePanAnimation(enabled: Boolean) {
+        _state.value = _state.value.copy(
+            panAnimationEnabled = enabled,
             isModified = true
         )
     }
@@ -294,6 +305,7 @@ class SettingsViewModel @Inject constructor(
                 displayIntervalSeconds = currentState.displayInterval,
                 transitionType = currentState.transitionType,
                 shuffleEnabled = currentState.shuffleEnabled,
+                panAnimationEnabled = currentState.panAnimationEnabled,
                 scheduleEnabled = currentState.scheduleEnabled,
                 scheduleStartTime = currentState.scheduleStartTime,
                 scheduleEndTime = currentState.scheduleEndTime
@@ -323,6 +335,7 @@ class SettingsViewModel @Inject constructor(
             displayInterval = SlideshowSettings.DEFAULT_DISPLAY_INTERVAL_SECONDS,
             transitionType = com.photoframe.core.model.TransitionType.DEFAULT,
             shuffleEnabled = false,
+            panAnimationEnabled = true,
             scheduleEnabled = false,
             scheduleStartTime = SlideshowSettings.DEFAULT_START_TIME,
             scheduleEndTime = SlideshowSettings.DEFAULT_END_TIME,

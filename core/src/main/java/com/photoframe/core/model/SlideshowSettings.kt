@@ -20,6 +20,7 @@ data class SlideshowSettings(
     val displayIntervalSeconds: Int = DEFAULT_DISPLAY_INTERVAL_SECONDS,
     val transitionType: TransitionType = TransitionType.DEFAULT,
     val shuffleEnabled: Boolean = false,
+    val panAnimationEnabled: Boolean = true,
     val scheduleEnabled: Boolean = false,
     val scheduleStartTime: LocalTime = DEFAULT_START_TIME,
     val scheduleEndTime: LocalTime = DEFAULT_END_TIME
@@ -51,6 +52,7 @@ data class SlideshowSettings(
             displayIntervalSeconds = DEFAULT_DISPLAY_INTERVAL_SECONDS,
             transitionType = TransitionType.DEFAULT,
             shuffleEnabled = false,
+            panAnimationEnabled = true,
             scheduleEnabled = false,
             scheduleStartTime = DEFAULT_START_TIME,
             scheduleEndTime = DEFAULT_END_TIME

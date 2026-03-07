@@ -117,12 +117,14 @@ class SlideshowViewModel @Inject constructor(
             }.collect { }
         }
 
-        // Load transition type from settings
+        // Load transition type and display interval from settings
         viewModelScope.launch {
             val settingsResult = settingsRepository.loadSlideshowSettings()
             if (settingsResult is Result.Success) {
                 _state.value = _state.value.copy(
-                    transitionType = settingsResult.data.transitionType
+                    transitionType = settingsResult.data.transitionType,
+                    displayIntervalMillis = settingsResult.data.displayIntervalMillis,
+                    panAnimationEnabled = settingsResult.data.panAnimationEnabled
                 )
             }
         }

@@ -30,7 +30,9 @@ data class SlideshowState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val bufferedPhotosCount: Int = 0,
-    val transitionType: TransitionType = TransitionType.DEFAULT
+    val transitionType: TransitionType = TransitionType.DEFAULT,
+    val displayIntervalMillis: Long = 10_000L,
+    val panAnimationEnabled: Boolean = true
 ) {
     /**
      * Returns true if slideshow is ready to display media (photos or videos).

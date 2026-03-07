@@ -40,6 +40,7 @@ data class SettingsState(
     val displayInterval: Int = SlideshowSettings.DEFAULT_DISPLAY_INTERVAL_SECONDS,
     val transitionType: TransitionType = TransitionType.DEFAULT,
     val shuffleEnabled: Boolean = false,
+    val panAnimationEnabled: Boolean = true,
 
     // Schedule Settings
     val scheduleEnabled: Boolean = false,

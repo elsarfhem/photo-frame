@@ -49,7 +49,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -62,6 +61,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.photoframe.app.ui.slideshow.transitions.PanTransition
+import com.photoframe.app.ui.slideshow.transitions.ZoomTransition
 import kotlin.math.abs
 
 /**
@@ -412,15 +413,26 @@ private fun MediaContent(
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (bitmap != null) {
-                // Apply Ken Burns effect for zoom transition
+                // Apply Ken Burns or Pan animation based on settings
                 if (transitionType == com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS) {
-                    KenBurnsImage(
+                    ZoomTransition(
                         bitmap = bitmap,
+                        photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
+                        durationMillis = state.displayIntervalMillis.toInt(),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (state.panAnimationEnabled) {
+                    // Apply pan animation with crop (no black bands)
+                    PanTransition(
+                        bitmap = bitmap,
+                        photoIndex = photoIndex,
+                        contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
+                        durationMillis = state.displayIntervalMillis.toInt(),
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    // Display photo with standard scale
+                    // Display photo with standard scale (letterbox/pillarbox)
                     Image(
                         bitmap = bitmap.asImageBitmap(),
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
@@ -428,6 +440,7 @@ private fun MediaContent(
                         contentScale = ContentScale.Fit // Scale-to-fit, preserves aspect ratio
                     )
                 }
+
             } else {
                 // Neither video nor valid bitmap - black screen
                 android.util.Log.w("SlideshowScreen", "BLACK SCREEN: No content to render. isVideo=${photoMetadata?.isVideo}, hasBitmap=${bitmap != null}")
@@ -569,40 +582,10 @@ private fun getTransitionSpec(transitionType: com.photoframe.core.model.Transiti
                     ) + fadeOut(animationSpec = tween(duration))
         }
         com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS -> {
-            // For Ken Burns, use fade transition (zoom is applied in KenBurnsImage)
+            // For Ken Burns, use fade transition (zoom is applied in ZoomTransition)
             fadeIn(animationSpec = tween(duration)) togetherWith
                     fadeOut(animationSpec = tween(duration))
         }
     }
 }
 
-/**
- * Displays an image with Ken Burns effect (slow zoom and pan).
- */
-@Composable
-private fun KenBurnsImage(
-    bitmap: Bitmap,
-    contentDescription: String,
-    modifier: Modifier = Modifier
-) {
-    // Animate scale from 1.0 to 1.15 over 10 seconds (or display interval)
-    val scale by animateFloatAsState(
-        targetValue = 1.15f,
-        animationSpec = tween(durationMillis = 10000, easing = androidx.compose.animation.core.LinearEasing),
-        label = "ken_burns_scale"
-    )
-
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
-    ) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = contentDescription,
-            modifier = Modifier
-                .fillMaxSize()
-                .scale(scale),
-            contentScale = ContentScale.Crop // Crop to fill for zoom effect
-        )
-    }
-}

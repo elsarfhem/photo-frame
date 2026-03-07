@@ -103,7 +103,8 @@ fun SettingsScreen(
                 state = state,
                 onIntervalChange = viewModel::updateDisplayInterval,
                 onTransitionChange = viewModel::updateTransitionType,
-                onShuffleChange = viewModel::toggleShuffle
+                onShuffleChange = viewModel::toggleShuffle,
+                onPanAnimationChange = viewModel::togglePanAnimation
             )
 
             Divider()
@@ -314,7 +315,8 @@ private fun DisplaySettingsSection(
     state: SettingsState,
     onIntervalChange: (Int) -> Unit,
     onTransitionChange: (TransitionType) -> Unit,
-    onShuffleChange: (Boolean) -> Unit
+    onShuffleChange: (Boolean) -> Unit,
+    onPanAnimationChange: (Boolean) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -414,6 +416,38 @@ private fun DisplaySettingsSection(
                         "Shuffle photos enabled"
                     } else {
                         "Shuffle photos disabled"
+                    }
+                }
+            )
+        }
+
+        // Pan Animation Toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp), // Minimum touch target
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Pan Animation (No Black Bands)",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Slowly pan photos to show full image",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = state.panAnimationEnabled,
+                onCheckedChange = onPanAnimationChange,
+                modifier = Modifier.semantics {
+                    contentDescription = if (state.panAnimationEnabled) {
+                        "Pan animation enabled"
+                    } else {
+                        "Pan animation disabled"
                     }
                 }
             )
