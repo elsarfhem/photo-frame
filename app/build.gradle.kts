@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.photoframe.app"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
@@ -38,6 +38,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -62,6 +63,9 @@ android {
 
 dependencies {
     implementation(project(":core"))
+
+    // Core library desugaring for java.time on API < 26
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     // Jetpack Compose BOM - using 2023.10.01 for compatibility with Kotlin 1.9.0
     implementation(platform("androidx.compose:compose-bom:2023.10.01"))

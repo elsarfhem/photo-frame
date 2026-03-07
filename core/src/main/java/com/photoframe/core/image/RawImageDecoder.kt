@@ -39,7 +39,11 @@ object RawImageDecoder {
     suspend fun decode(bytes: ByteArray, extension: String): Result<Bitmap> {
         return try {
             when (extension.lowercase()) {
-                "dng" -> decodeDng(bytes)
+                "dng" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    decodeDng(bytes)
+                } else {
+                    extractEmbeddedJpeg(bytes, extension)
+                }
                 "cr2", "nef", "rw2", "arw" -> extractEmbeddedJpeg(bytes, extension)
                 else -> Result.error(
                     UnsupportedOperationException("Unsupported RAW format: $extension"),
@@ -54,9 +58,9 @@ object RawImageDecoder {
 
     /**
      * Decodes DNG file using Android's native decoder.
-     * Only available on API 24+.
+     * Only available on API 28+.
      */
-    @RequiresApi(Build.VERSION_CODES.N)
+    @RequiresApi(Build.VERSION_CODES.P)
     private fun decodeDng(bytes: ByteArray): Result<Bitmap> {
         return try {
             // Android has native DNG support via ImageDecoder
