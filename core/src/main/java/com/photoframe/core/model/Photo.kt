@@ -47,4 +47,10 @@ data class Photo(
     val isVideo: Boolean
         get() = mimeType.startsWith("video/", ignoreCase = true) ||
                 extension.lowercase() in setOf("mp4", "mov", "avi", "mkv", "webm", "m4v")
+
+    /**
+     * Returns true if this is a RAW image file.
+     */
+    val isRaw: Boolean
+        get() = extension.lowercase() in setOf("dng", "cr2", "nef", "rw2", "arw")
 }

@@ -13,15 +13,17 @@ import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 
 /**
- * Data source for scanning photos from SMB/Samba network shares.
+ * Data source for scanning photos and videos from SMB/Samba network shares.
  *
- * Provides recursive directory scanning with filtering for supported image formats.
+ * Provides recursive directory scanning with filtering for supported media formats.
  * Includes timeout handling for large collections (30 seconds maximum).
  *
  * Supported Formats:
- * - JPEG (.jpg, .jpeg)
- * - PNG (.png)
- * - HEIC (.heic)
+ * - Images: JPEG (.jpg, .jpeg), PNG (.png), HEIC (.heic)
+ * - RAW: DNG (.dng), CR2 (.cr2), NEF (.nef), RW2 (.rw2), ARW (.arw)
+ * - Videos: MP4 (.mp4), MOV (.mov), AVI (.avi), MKV (.mkv), WebM (.webm), M4V (.m4v)
+ *
+ * RAW Processing: Uses embedded JPEG previews for fast loading.
  *
  * Thread Safety: All methods use withContext(ioDispatcher) for safe concurrent access.
  *
@@ -182,11 +184,12 @@ class SmbPhotoDataSource @Inject constructor(
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "heic" -> "image/heic"
-            "rw2", "raw" -> "image/x-panasonic-raw"
+            // RAW formats
+            "dng" -> "image/x-adobe-dng"
             "cr2" -> "image/x-canon-cr2"
             "nef" -> "image/x-nikon-nef"
+            "rw2" -> "image/x-panasonic-raw"
             "arw" -> "image/x-sony-arw"
-            "dng" -> "image/x-adobe-dng"
             // Videos
             "mp4" -> "video/mp4"
             "mov" -> "video/quicktime"
@@ -203,11 +206,17 @@ class SmbPhotoDataSource @Inject constructor(
 
         /**
          * Supported media file extensions (case-insensitive).
-         * Includes both photos and videos.
+         * Includes photos, RAW images, and videos.
+         *
+         * RAW Support:
+         * - DNG: Android native decoder
+         * - CR2/NEF/RW2/ARW: Extract embedded JPEG preview
          */
         private val SUPPORTED_EXTENSIONS = setOf(
             // Image formats
-            "jpg", "jpeg", "png", "heic", "rw2", "raw", "cr2", "nef", "arw", "dng",
+            "jpg", "jpeg", "png", "heic",
+            // RAW formats
+            "dng", "cr2", "nef", "rw2", "arw",
             // Video formats
             "mp4", "mov", "avi", "mkv", "webm", "m4v"
         )

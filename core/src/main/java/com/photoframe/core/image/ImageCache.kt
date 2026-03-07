@@ -82,6 +82,7 @@ class ImageCache @Inject constructor(
      * - SMB URLs (smb://server/share/path/photo.jpg)
      * - Local file paths (file:///path/photo.jpg)
      * - HTTP URLs (http://example.com/photo.jpg) - for future use
+     * - RAW files (DNG, CR2, NEF, RW2, ARW) - via RawImageDecoder
      *
      * Thread Safety: Safe to call concurrently from multiple coroutines.
      *
@@ -95,36 +96,14 @@ class ImageCache @Inject constructor(
      */
     suspend fun load(path: String): Result<Bitmap> = withContext(ioDispatcher) {
         return@withContext try {
-            // Build image request with downsampling
-            val request = ImageRequest.Builder(context)
-                .data(path)
-                // Downsample to screen resolution (2560x1600)
-                .size(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
-                // Allow hardware bitmaps for better performance
-                .allowHardware(true)
-                // Use RGB_565 for memory efficiency (Phase 1), upgrade to ARGB_8888 later if needed
-                .bitmapConfig(Bitmap.Config.ARGB_8888)
-                .build()
-
-            // Execute request
-            when (val result = imageLoader.execute(request)) {
-                is SuccessResult -> {
-                    val bitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                    if (bitmap != null) {
-                        Result.success(bitmap)
-                    } else {
-                        Result.error(
-                            IllegalStateException("Failed to extract bitmap from drawable"),
-                            "Image loaded but could not extract bitmap"
-                        )
-                    }
-                }
-                is ErrorResult -> {
-                    Result.error(
-                        result.throwable,
-                        "Failed to load image: ${result.throwable.message}"
-                    )
-                }
+            // Check if this is a RAW file
+            val extension = path.substringAfterLast('.', "")
+            if (RawImageDecoder.isRawFormat(extension)) {
+                // Load RAW file using custom decoder
+                loadRawImage(path, extension)
+            } else {
+                // Use Coil for standard formats
+                loadStandardImage(path)
             }
         } catch (e: OutOfMemoryError) {
             // Handle OOM gracefully
@@ -134,6 +113,73 @@ class ImageCache @Inject constructor(
             )
         } catch (e: Exception) {
             Result.error(e, "Failed to load image: ${e.message}")
+        }
+    }
+
+    /**
+     * Loads standard image formats using Coil.
+     */
+    private suspend fun loadStandardImage(path: String): Result<Bitmap> {
+        // Build image request with downsampling
+        val request = ImageRequest.Builder(context)
+            .data(path)
+            // Downsample to screen resolution (2560x1600)
+            .size(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
+            // Allow hardware bitmaps for better performance
+            .allowHardware(true)
+            // Use ARGB_8888 for quality
+            .bitmapConfig(Bitmap.Config.ARGB_8888)
+            .build()
+
+        // Execute request
+        return when (val result = imageLoader.execute(request)) {
+            is SuccessResult -> {
+                val bitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                if (bitmap != null) {
+                    Result.success(bitmap)
+                } else {
+                    Result.error(
+                        IllegalStateException("Failed to extract bitmap from drawable"),
+                        "Image loaded but could not extract bitmap"
+                    )
+                }
+            }
+            is ErrorResult -> {
+                Result.error(
+                    result.throwable,
+                    "Failed to load image: ${result.throwable.message}"
+                )
+            }
+        }
+    }
+
+    /**
+     * Loads RAW image formats using RawImageDecoder.
+     */
+    private suspend fun loadRawImage(path: String, extension: String): Result<Bitmap> {
+        return try {
+            // Read RAW file bytes from SMB
+            val bytesResult = smbClient.readFile(path)
+            when (bytesResult) {
+                is Result.Success -> {
+                    // Decode RAW bytes to bitmap
+                    RawImageDecoder.decode(bytesResult.data, extension)
+                }
+                is Result.Error -> {
+                    Result.error(
+                        bytesResult.exception,
+                        "Failed to read RAW file: ${bytesResult.message}"
+                    )
+                }
+                is Result.Loading -> {
+                    Result.error(
+                        IllegalStateException("Unexpected loading state"),
+                        "SMB client returned loading state"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Result.error(e, "Failed to load RAW image: ${e.message}")
         }
     }
 
