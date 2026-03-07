@@ -3,6 +3,9 @@ package com.photoframe.core.repository
 import android.graphics.Bitmap
 import android.util.Log
 import com.photoframe.core.data.PhotoSourcesManager
+import com.photoframe.core.database.PhotoDao
+import com.photoframe.core.database.toEntity
+import com.photoframe.core.database.toPhoto
 import com.photoframe.core.di.IoDispatcher
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.PhotoSourceConfig
@@ -12,6 +15,7 @@ import com.photoframe.core.source.PhotoSource
 import com.photoframe.core.source.PhotoSourceFactory
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -52,11 +57,15 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     private val photoSourcesManager: PhotoSourcesManager,
     private val photoSourceFactory: PhotoSourceFactory,
     private val photoBufferManager: PhotoBufferManager,
+    private val photoDao: PhotoDao,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : MultiSourcePhotoRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val mutex = Mutex()
+
+    // Background scan job
+    private var backgroundScanJob: Job? = null
 
     // Photo list state
     private val _photos = MutableStateFlow<List<Photo>>(emptyList())
@@ -74,6 +83,14 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     override val error: StateFlow<String?> = _error.asStateFlow()
 
+    // Current photo metadata state
+    private val _currentPhotoMetadata = MutableStateFlow<Photo?>(null)
+    override val currentPhotoMetadata: StateFlow<Photo?> = _currentPhotoMetadata.asStateFlow()
+
+    // Current photo index state
+    private val _currentPhotoIndex = MutableStateFlow(-1)
+    override val currentPhotoIndex: StateFlow<Int> = _currentPhotoIndex.asStateFlow()
+
     // Photo sources state - convert Flow to StateFlow
     override val photoSources: StateFlow<List<PhotoSourceConfig>> =
         photoSourcesManager.sources.stateIn(
@@ -82,19 +99,18 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
             initialValue = emptyList()
         )
 
-    // Current photo index
+    // Current photo index (internal tracking)
     private var currentIndex: Int = -1
 
     /**
-     * Loads photos from all enabled sources.
+     * Loads photos from database cache or scans sources.
      *
      * Strategy:
-     * 1. Get all enabled sources
-     * 2. Create PhotoSource instances
-     * 3. Scan sources in parallel
-     * 4. Aggregate results
-     * 5. Shuffle if enabled (Fisher-Yates)
-     * 6. Initialize buffer
+     * 1. Check database cache for all enabled sources (instant startup)
+     * 2. If all cached: Use cached photos immediately
+     * 3. If any missing: Scan only missing sources from network
+     * 4. Save scanned photos to database
+     * 5. Start background sync to refresh all sources
      *
      * Thread Safety: Safe to call concurrently.
      *
@@ -126,10 +142,64 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     )
                 }
 
-                // Scan all sources in parallel
-                Log.d(TAG, "loadPhotos: Starting parallel source scanning...")
-                val allPhotos = scanSourcesInParallel(sourceConfigs)
-                Log.d(TAG, "loadPhotos: Parallel scan complete - Total photos: ${allPhotos.size}")
+                // Step 1: Check database cache for all sources
+                val cachedPhotosMap = mutableMapOf<String, List<Photo>>()
+                val sourcesToScan = mutableListOf<PhotoSourceConfig>()
+
+                for (config in sourceConfigs) {
+                    val sourceId = config.id
+                    val cachedPhotos = photoDao.getPhotosForSource(sourceId).map { it.toPhoto() }
+
+                    if (cachedPhotos.isNotEmpty()) {
+                        Log.d(TAG, "loadPhotos: Found ${cachedPhotos.size} cached photos for source '${config.displayName}'")
+                        cachedPhotosMap[sourceId] = cachedPhotos
+                    } else {
+                        Log.d(TAG, "loadPhotos: No cache for source '${config.displayName}' - will scan")
+                        sourcesToScan.add(config)
+                    }
+                }
+
+                val allCachedPhotos = cachedPhotosMap.values.flatten()
+
+                // Step 2: If we have cached photos, use them for instant startup
+                if (allCachedPhotos.isNotEmpty()) {
+                    Log.d(TAG, "loadPhotos: Found ${allCachedPhotos.size} total cached photos - instant startup!")
+
+                    var photoList = allCachedPhotos
+                    if (shuffleEnabled) {
+                        photoList = fisherYatesShuffle(photoList)
+                    }
+
+                    _photos.value = photoList
+                    currentIndex = 0
+
+                    // Initialize buffer
+                    val bufferResult = photoBufferManager.initialize(photoList, currentIndex)
+                    if (bufferResult is Result.Success) {
+                        val firstPhoto = photoBufferManager.getCurrentPhoto()
+                        _currentPhoto.value = firstPhoto
+                        _currentPhotoMetadata.value = photoList.getOrNull(currentIndex)
+                        _currentPhotoIndex.value = currentIndex
+                        _isLoading.value = false
+
+                        // Start background sync to refresh cache and scan missing sources
+                        startBackgroundSync(sourceConfigs, shuffleEnabled)
+
+                        return@withContext Result.success(photoList.size)
+                    }
+                }
+
+                // Step 3: No cache or partial cache - scan sources that need it
+                Log.d(TAG, "loadPhotos: Scanning ${sourcesToScan.size} source(s) from network")
+                val scannedPhotos = if (sourcesToScan.isNotEmpty()) {
+                    scanSourcesInParallel(sourcesToScan, saveToDatabase = true)
+                } else {
+                    emptyList()
+                }
+
+                // Combine cached + scanned photos
+                val allPhotos = allCachedPhotos + scannedPhotos
+                Log.d(TAG, "loadPhotos: Total photos: ${allPhotos.size} (cached=${allCachedPhotos.size}, scanned=${scannedPhotos.size})")
 
                 if (allPhotos.isEmpty()) {
                     Log.w(TAG, "loadPhotos: No photos found in any source!")
@@ -166,14 +236,20 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 // Get first photo
                 val firstPhoto = photoBufferManager.getCurrentPhoto()
                 _currentPhoto.value = firstPhoto
+                _currentPhotoMetadata.value = finalPhotos.getOrNull(currentIndex)
+                _currentPhotoIndex.value = currentIndex
 
                 _isLoading.value = false
                 _error.value = null
+
+                // Start background sync to keep cache fresh
+                startBackgroundSync(sourceConfigs, shuffleEnabled)
 
                 Result.success(finalPhotos.size)
             } catch (e: Exception) {
                 _isLoading.value = false
                 _error.value = "Failed to load photos: ${e.message}"
+                Log.e(TAG, "Failed to load photos", e)
                 Result.error(e, "Failed to load photos from sources")
             }
         }
@@ -186,12 +262,14 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
      * Isolated error handling - one source failure doesn't block others.
      *
      * @param sourceConfigs List of source configurations to scan
+     * @param saveToDatabase If true, saves scanned photos to database cache
      * @return Aggregated list of photos from all successful sources
      */
     private suspend fun scanSourcesInParallel(
-        sourceConfigs: List<PhotoSourceConfig>
+        sourceConfigs: List<PhotoSourceConfig>,
+        saveToDatabase: Boolean = false
     ): List<Photo> = coroutineScope {
-        Log.d(TAG, "scanSourcesInParallel: Scanning ${sourceConfigs.size} source(s) in parallel...")
+        Log.d(TAG, "scanSourcesInParallel: Scanning ${sourceConfigs.size} source(s) in parallel (saveToDb=$saveToDatabase)...")
 
         // Create source instances and scan in parallel
         val scanResults = sourceConfigs.map { config ->
@@ -217,8 +295,21 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     val scanResult = source.scanPhotos()
                     when (scanResult) {
                         is Result.Success -> {
-                            Log.d(TAG, "scanSourcesInParallel: Source '${config.displayName}' scan SUCCESS - ${scanResult.data.size} photos")
-                            scanResult.data
+                            val photos = scanResult.data
+                            Log.d(TAG, "scanSourcesInParallel: Source '${config.displayName}' scan SUCCESS - ${photos.size} photos")
+
+                            // Save to database if requested
+                            if (saveToDatabase && photos.isNotEmpty()) {
+                                try {
+                                    val entities = photos.map { it.toEntity(config.id) }
+                                    photoDao.insertPhotos(entities)
+                                    Log.d(TAG, "scanSourcesInParallel: Saved ${entities.size} photos to database for source '${config.displayName}'")
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "scanSourcesInParallel: Failed to save to database for source '${config.displayName}'", e)
+                                }
+                            }
+
+                            photos
                         }
                         is Result.Error -> {
                             // Log error but continue with other sources
@@ -296,15 +387,17 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 )
             }
 
-            // Update current photo bitmap
+            // Update current photo bitmap and metadata atomically
             val bitmap = photoBufferManager.getCurrentPhoto()
             _currentPhoto.value = bitmap
+            _currentPhotoMetadata.value = shuffled.getOrNull(currentIndex)
+            _currentPhotoIndex.value = currentIndex
 
             Result.success(shuffled.size)
         }
     }
 
-    override suspend fun nextPhoto(): Result<Bitmap> = withContext(ioDispatcher) {
+    override suspend fun nextPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -317,8 +410,12 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
             val result = photoBufferManager.getNextPhoto()
             when (result) {
                 is Result.Success -> {
-                    currentIndex = (currentIndex + 1) % currentPhotos.size
+                    // Note: Don't increment index here - PhotoBufferManager already did it
+                    // Just sync our index with the buffer's index
+                    currentIndex = photoBufferManager.getCurrentIndex()
                     _currentPhoto.value = result.data
+                    _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
+                    _currentPhotoIndex.value = currentIndex
                     _error.value = null
                     Result.success(result.data)
                 }
@@ -336,7 +433,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun previousPhoto(): Result<Bitmap> = withContext(ioDispatcher) {
+    override suspend fun previousPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -349,8 +446,12 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
             val result = photoBufferManager.getPreviousPhoto()
             when (result) {
                 is Result.Success -> {
-                    currentIndex = if (currentIndex == 0) currentPhotos.size - 1 else currentIndex - 1
+                    // Note: Don't decrement index here - PhotoBufferManager already did it
+                    // Just sync our index with the buffer's index
+                    currentIndex = photoBufferManager.getCurrentIndex()
                     _currentPhoto.value = result.data
+                    _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
+                    _currentPhotoIndex.value = currentIndex
                     _error.value = null
                     Result.success(result.data)
                 }
@@ -387,6 +488,10 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun clear() = withContext(ioDispatcher) {
         mutex.withLock {
+            // Cancel background scan
+            backgroundScanJob?.cancel()
+            backgroundScanJob = null
+
             _photos.value = emptyList()
             _currentPhoto.value = null
             _isLoading.value = false
@@ -394,6 +499,98 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
             currentIndex = -1
 
             photoBufferManager.clear()
+        }
+    }
+
+    /**
+     * Starts background sync to refresh database cache.
+     * Rescans all enabled sources and updates database.
+     *
+     * @param sourceConfigs List of source configurations to sync
+     * @param shuffleEnabled Whether to shuffle newly discovered photos
+     */
+    private fun startBackgroundSync(
+        sourceConfigs: List<PhotoSourceConfig>,
+        shuffleEnabled: Boolean
+    ) {
+        backgroundScanJob?.cancel()
+
+        backgroundScanJob = CoroutineScope(ioDispatcher).launch {
+            try {
+                Log.d(TAG, "Background sync: Starting refresh for ${sourceConfigs.size} source(s)")
+
+                // Get current photos from memory
+                val currentPhotos = mutex.withLock { _photos.value }
+                val currentPaths = currentPhotos.map { it.path }.toSet()
+
+                // Scan all sources in parallel
+                val allNewPhotos = mutableListOf<Photo>()
+
+                for (config in sourceConfigs) {
+                    try {
+                        Log.d(TAG, "Background sync: Scanning source '${config.displayName}'")
+
+                        // Create source instance
+                        val sourceResult = photoSourceFactory.createSource(config)
+                        if (sourceResult !is Result.Success) {
+                            Log.e(TAG, "Background sync: Failed to create source '${config.displayName}'")
+                            continue
+                        }
+
+                        val source = sourceResult.data as PhotoSource
+
+                        // Scan photos
+                        val scanResult = source.scanPhotos()
+                        when (scanResult) {
+                            is Result.Success -> {
+                                val photos = scanResult.data
+                                Log.d(TAG, "Background sync: Source '${config.displayName}' - ${photos.size} photos")
+
+                                // Update database
+                                val entities = photos.map { it.toEntity(config.id) }
+                                photoDao.deletePhotosForSource(config.id)
+                                photoDao.insertPhotos(entities)
+                                Log.d(TAG, "Background sync: Updated database for source '${config.displayName}'")
+
+                                // Find new photos not in current list
+                                val newPhotos = photos.filter { it.path !in currentPaths }
+                                allNewPhotos.addAll(newPhotos)
+                            }
+                            is Result.Error -> {
+                                Log.e(TAG, "Background sync: Source '${config.displayName}' failed: ${scanResult.message}", scanResult.exception)
+                            }
+                            is Result.Loading -> {
+                                // Should not happen
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Background sync: Exception for source '${config.displayName}'", e)
+                    }
+                }
+
+                // Add new photos to slideshow if any found
+                if (allNewPhotos.isNotEmpty()) {
+                    Log.d(TAG, "Background sync: Adding ${allNewPhotos.size} new photos to slideshow")
+
+                    val newPhotosToAdd = if (shuffleEnabled) {
+                        fisherYatesShuffle(allNewPhotos)
+                    } else {
+                        allNewPhotos
+                    }
+
+                    mutex.withLock {
+                        val mergedPhotos = _photos.value + newPhotosToAdd
+                        _photos.value = mergedPhotos
+                        Log.d(TAG, "Background sync: Updated photo list to ${mergedPhotos.size} photos")
+                    }
+                } else {
+                    Log.d(TAG, "Background sync: No new photos discovered")
+                }
+
+                Log.d(TAG, "Background sync: Complete")
+            } catch (e: Exception) {
+                Log.e(TAG, "Background sync: Exception", e)
+            }
         }
     }
 

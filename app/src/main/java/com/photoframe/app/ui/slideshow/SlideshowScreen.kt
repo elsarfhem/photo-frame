@@ -3,10 +3,21 @@ package com.photoframe.app.ui.slideshow
 import android.graphics.Bitmap
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -19,10 +30,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,9 +49,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -60,18 +73,21 @@ import kotlin.math.abs
  * - Loading indicator
  * - Error UI with retry button
  * - Immersive mode (hides system UI)
+ * - Settings button for accessing configuration
  *
  * Architecture: Observes SlideshowViewModel state via StateFlow.
  *
  * @param viewModel Slideshow view model (injected via Hilt)
  * @param shuffleEnabled If true, shuffles photos on initialization
  * @param autoPlay If true, starts auto-advance on initialization
+ * @param onNavigateToSettings Callback to navigate to settings screen
  */
 @Composable
 fun SlideshowScreen(
     viewModel: SlideshowViewModel = hiltViewModel(),
     shuffleEnabled: Boolean = false,
-    autoPlay: Boolean = true
+    autoPlay: Boolean = true,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -124,7 +140,9 @@ fun SlideshowScreen(
                     photoMetadata = state.currentPhotoMetadata,
                     photoIndex = state.photoIndex,
                     totalPhotos = state.totalPhotos,
-                    viewModel = viewModel
+                    transitionType = state.transitionType,
+                    viewModel = viewModel,
+                    onNavigateToSettings = onNavigateToSettings
                 )
 
                 // Connection status indicator (top-right corner)
@@ -259,13 +277,15 @@ private fun EmptyContent() {
 
 /**
  * Displays the current media (photo or video) with scale-to-fit.
- * Includes swipe gesture detection for manual navigation.
+ * Includes swipe gesture detection for manual navigation and transition effects.
  *
  * @param bitmap Current photo bitmap (null for videos)
  * @param photoMetadata Current media metadata
  * @param photoIndex Current media index (0-based)
  * @param totalPhotos Total number of media items
+ * @param transitionType Type of transition effect to apply
  * @param viewModel Slideshow view model
+ * @param onNavigateToSettings Callback to navigate to settings screen
  */
 @Composable
 private fun MediaContent(
@@ -273,12 +293,17 @@ private fun MediaContent(
     photoMetadata: com.photoframe.core.model.Photo?,
     photoIndex: Int,
     totalPhotos: Int,
-    viewModel: SlideshowViewModel = hiltViewModel()
+    transitionType: com.photoframe.core.model.TransitionType,
+    viewModel: SlideshowViewModel = hiltViewModel(),
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val view = LocalView.current
     var dragOffset by remember { mutableStateOf(0f) }
     var showControls by remember { mutableStateOf(false) }
     val state by viewModel.state.collectAsState()
+
+    // Get VideoPlayerViewModel for SmbDataSourceFactory injection
+    val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
 
     // Auto-hide controls after 3 seconds
     LaunchedEffect(showControls) {
@@ -292,31 +317,55 @@ private fun MediaContent(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { offset ->
+                // Combined gesture detector to avoid conflicts between tap and drag
+                // Detects both taps (for navigation/controls) and horizontal drags (for swipe)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downPosition = down.position
+                    var totalDrag = 0f
+                    var hasDragged = false
+
+                    do {
+                        val event = awaitPointerEvent()
+                        event.changes.forEach { change ->
+                            val dragAmount = change.position.x - change.previousPosition.x
+                            totalDrag += dragAmount
+                            if (abs(totalDrag) > 10f) {
+                                hasDragged = true
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+
+                    // Determine if this was a tap or drag based on movement
+                    if (hasDragged && abs(totalDrag) > SWIPE_THRESHOLD) {
+                        // Horizontal drag detected - handle as swipe
+                        view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+                        if (totalDrag > 0) {
+                            viewModel.previousPhoto(pauseAutoAdvance = true)
+                        } else {
+                            viewModel.nextPhoto(pauseAutoAdvance = true)
+                        }
+                    } else if (!hasDragged) {
+                        // No significant drag - handle as tap
                         if (!showControls) {
-                            // First tap: show controls
                             showControls = true
                         } else {
-                            // Subsequent taps: handle zone navigation
+                            // Handle zone-based navigation
                             val screenWidth = size.width
-                            val tapX = offset.x
+                            val tapX = downPosition.x
 
                             when {
                                 tapX < screenWidth / 3 -> {
-                                    // Left zone: previous
                                     view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                                     viewModel.previousPhoto(pauseAutoAdvance = true)
                                     showControls = false
                                 }
                                 tapX > screenWidth * 2 / 3 -> {
-                                    // Right zone: next
                                     view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                                     viewModel.nextPhoto(pauseAutoAdvance = true)
                                     showControls = false
                                 }
                                 else -> {
-                                    // Center zone: play/pause
                                     view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                                     if (state.isPlaying) {
                                         viewModel.pause()
@@ -328,58 +377,61 @@ private fun MediaContent(
                             }
                         }
                     }
-                )
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        dragOffset = 0f
-                    },
-                    onDragEnd = {
-                        // Trigger navigation if drag exceeds threshold
-                        if (abs(dragOffset) > SWIPE_THRESHOLD) {
-                            // Haptic feedback
-                            view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
-
-                            if (dragOffset > 0) {
-                                // Swiped right → previous media
-                                viewModel.previousPhoto(pauseAutoAdvance = true)
-                            } else {
-                                // Swiped left → next media
-                                viewModel.nextPhoto(pauseAutoAdvance = true)
-                            }
-                        }
-                        dragOffset = 0f
-                    },
-                    onDragCancel = {
-                        dragOffset = 0f
-                    },
-                    onHorizontalDrag = { _, dragAmount ->
-                        dragOffset += dragAmount
-                    }
-                )
+                }
             },
         contentAlignment = Alignment.Center
     ) {
-        // Check if current media is a video
-        if (photoMetadata?.isVideo == true) {
-            // Display video player
-            VideoPlayer(
-                videoPath = photoMetadata.path,
-                onVideoEnded = {
-                    // Auto-advance to next media when video finishes
-                    viewModel.nextPhoto(pauseAutoAdvance = false)
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else if (bitmap != null) {
-            // Display photo
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit // Scale-to-fit, preserves aspect ratio
-            )
+        // Animated media display with transitions
+        // Use fileName as key to prevent VideoPlayer disposal during transitions
+        AnimatedContent(
+            targetState = photoMetadata?.fileName ?: "empty_$photoIndex",
+            transitionSpec = {
+                // No transition for videos - instant switch to prevent player disposal
+                if (photoMetadata?.isVideo == true) {
+                    EnterTransition.None togetherWith ExitTransition.None
+                } else {
+                    getTransitionSpec(transitionType)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+            label = "media_transition"
+        ) { fileName ->
+            // Check if current media is a video
+            android.util.Log.d("SlideshowScreen", "Rendering media: fileName=$fileName, isVideo=${photoMetadata?.isVideo}, hasBitmap=${bitmap != null}")
+
+            if (photoMetadata?.isVideo == true) {
+                // Display video player with SMB support
+                android.util.Log.d("SlideshowScreen", "Showing VideoPlayer for: ${photoMetadata.path}")
+                VideoPlayer(
+                    videoPath = photoMetadata.path,
+                    onVideoEnded = {
+                        // Auto-advance to next media when video finishes
+                        viewModel.nextPhoto(pauseAutoAdvance = false)
+                    },
+                    smbDataSourceFactory = videoPlayerViewModel.smbDataSourceFactory,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (bitmap != null) {
+                // Apply Ken Burns effect for zoom transition
+                if (transitionType == com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS) {
+                    KenBurnsImage(
+                        bitmap = bitmap,
+                        contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Display photo with standard scale
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit // Scale-to-fit, preserves aspect ratio
+                    )
+                }
+            } else {
+                // Neither video nor valid bitmap - black screen
+                android.util.Log.w("SlideshowScreen", "BLACK SCREEN: No content to render. isVideo=${photoMetadata?.isVideo}, hasBitmap=${bitmap != null}")
+            }
         }
 
         // Show control overlay when tapped
@@ -387,7 +439,8 @@ private fun MediaContent(
             ControlOverlay(
                 isPlaying = state.isPlaying,
                 photoIndex = photoIndex,
-                totalPhotos = totalPhotos
+                totalPhotos = totalPhotos,
+                onNavigateToSettings = onNavigateToSettings
             )
         }
     }
@@ -400,13 +453,29 @@ private fun MediaContent(
 private fun ControlOverlay(
     isPlaying: Boolean,
     photoIndex: Int,
-    totalPhotos: Int
+    totalPhotos: Int,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.3f))
     ) {
+        // Settings button (top-right corner)
+        IconButton(
+            onClick = onNavigateToSettings,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "Settings",
+                modifier = Modifier.size(48.dp),
+                tint = Color.White.copy(alpha = 0.9f)
+            )
+        }
+
         // Left zone indicator
         Box(
             modifier = Modifier
@@ -477,3 +546,63 @@ private fun ControlOverlay(
  * Drag must exceed this distance to trigger navigation.
  */
 private const val SWIPE_THRESHOLD = 100f
+
+/**
+ * Returns the appropriate transition spec based on transition type.
+ */
+private fun getTransitionSpec(transitionType: com.photoframe.core.model.TransitionType): ContentTransform {
+    val duration = 600 // milliseconds
+
+    return when (transitionType) {
+        com.photoframe.core.model.TransitionType.FADE -> {
+            fadeIn(animationSpec = tween(duration)) togetherWith
+                    fadeOut(animationSpec = tween(duration))
+        }
+        com.photoframe.core.model.TransitionType.SLIDE -> {
+            slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(duration)
+            ) + fadeIn(animationSpec = tween(duration)) togetherWith
+                    slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> -fullWidth },
+                        animationSpec = tween(duration)
+                    ) + fadeOut(animationSpec = tween(duration))
+        }
+        com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS -> {
+            // For Ken Burns, use fade transition (zoom is applied in KenBurnsImage)
+            fadeIn(animationSpec = tween(duration)) togetherWith
+                    fadeOut(animationSpec = tween(duration))
+        }
+    }
+}
+
+/**
+ * Displays an image with Ken Burns effect (slow zoom and pan).
+ */
+@Composable
+private fun KenBurnsImage(
+    bitmap: Bitmap,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    // Animate scale from 1.0 to 1.15 over 10 seconds (or display interval)
+    val scale by animateFloatAsState(
+        targetValue = 1.15f,
+        animationSpec = tween(durationMillis = 10000, easing = androidx.compose.animation.core.LinearEasing),
+        label = "ken_burns_scale"
+    )
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = contentDescription,
+            modifier = Modifier
+                .fillMaxSize()
+                .scale(scale),
+            contentScale = ContentScale.Crop // Crop to fill for zoom effect
+        )
+    }
+}

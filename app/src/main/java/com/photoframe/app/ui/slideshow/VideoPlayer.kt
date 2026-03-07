@@ -2,6 +2,7 @@ package com.photoframe.app.ui.slideshow
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,13 +13,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.ViewModel
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
+import com.photoframe.app.media.SmbDataSourceFactory
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+
+/**
+ * ViewModel for VideoPlayer to provide SmbDataSourceFactory via Hilt.
+ */
+@HiltViewModel
+class VideoPlayerViewModel @Inject constructor(
+    val smbDataSourceFactory: SmbDataSourceFactory
+) : ViewModel()
 
 /**
  * Video player composable using ExoPlayer.
@@ -28,22 +42,28 @@ import androidx.media3.ui.PlayerView
  * - Full-screen display with proper scaling
  * - Lifecycle-aware (pauses/resumes with activity)
  * - Callback when video ends
+ * - SMB protocol support via custom DataSource
  *
  * @param videoPath SMB path to video file (e.g., "smb://server/share/video.mp4")
  * @param onVideoEnded Callback invoked when video finishes playing
+ * @param smbDataSourceFactory Factory for SMB DataSource (injected via Hilt)
  * @param modifier Modifier for layout
  */
 @Composable
 fun VideoPlayer(
     videoPath: String,
     onVideoEnded: () -> Unit,
+    smbDataSourceFactory: SmbDataSourceFactory,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
 
+    Log.d(TAG, "VideoPlayer composable invoked for: $videoPath")
+
     // Create ExoPlayer instance
-    val exoPlayer = remember {
-        createExoPlayer(context, videoPath, onVideoEnded)
+    val exoPlayer = remember(videoPath) {
+        Log.d(TAG, "Creating ExoPlayer for: $videoPath")
+        createExoPlayer(context, videoPath, onVideoEnded, smbDataSourceFactory)
     }
 
     // Release player when composable leaves composition
@@ -72,20 +92,29 @@ fun VideoPlayer(
 }
 
 /**
- * Creates and configures ExoPlayer instance for SMB video playback.
+ * Creates and configures ExoPlayer instance for video playback.
+ * Supports both SMB and standard protocols (file://, http://).
  *
  * @param context Android context
- * @param videoPath SMB path to video
+ * @param videoPath Path to video (SMB, file, or HTTP URL)
  * @param onVideoEnded Callback when video ends
+ * @param smbDataSourceFactory Factory for SMB DataSource
  * @return Configured ExoPlayer instance
  */
 private fun createExoPlayer(
     context: Context,
     videoPath: String,
-    onVideoEnded: () -> Unit
+    onVideoEnded: () -> Unit,
+    smbDataSourceFactory: SmbDataSourceFactory
 ): ExoPlayer {
-    // Create data source factory for SMB support
-    val dataSourceFactory: DataSource.Factory = DefaultDataSource.Factory(context)
+    // Choose data source factory based on protocol
+    val dataSourceFactory: DataSource.Factory = if (videoPath.startsWith("smb://", ignoreCase = true)) {
+        Log.d(TAG, "createExoPlayer: Using SMB data source for: $videoPath")
+        smbDataSourceFactory
+    } else {
+        Log.d(TAG, "createExoPlayer: Using default data source for: $videoPath")
+        DefaultDataSource.Factory(context)
+    }
 
     // Create media source
     val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
@@ -98,13 +127,42 @@ private fun createExoPlayer(
         playWhenReady = true // Auto-play
         repeatMode = Player.REPEAT_MODE_OFF
 
-        // Listen for playback end
+        // Listen for playback end and errors
         addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
-                    onVideoEnded()
+                val stateString = when (playbackState) {
+                    Player.STATE_IDLE -> "IDLE"
+                    Player.STATE_BUFFERING -> "BUFFERING"
+                    Player.STATE_READY -> "READY"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> "UNKNOWN"
                 }
+                Log.d(TAG, "onPlaybackStateChanged: $stateString for $videoPath")
+
+                if (playbackState == Player.STATE_ENDED) {
+                    Log.d(TAG, "Video playback ended: $videoPath")
+                    onVideoEnded()
+                } else if (playbackState == Player.STATE_READY) {
+                    Log.d(TAG, "Video ready to play: $videoPath, isPlaying=${this@apply.isPlaying}")
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                Log.d(TAG, "onIsPlayingChanged: isPlaying=$isPlaying for $videoPath")
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                Log.e(TAG, "ExoPlayer error for $videoPath: ${error.message}", error)
+                Log.e(TAG, "Error code: ${error.errorCode}")
+                // Trigger onVideoEnded to skip to next media on error
+                onVideoEnded()
+            }
+
+            override fun onRenderedFirstFrame() {
+                Log.d(TAG, "onRenderedFirstFrame: First frame rendered for $videoPath")
             }
         })
     }
 }
+
+private const val TAG = "VideoPlayer"

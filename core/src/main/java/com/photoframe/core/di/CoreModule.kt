@@ -179,9 +179,10 @@ object CoreModule {
         photoSourcesManager: PhotoSourcesManager,
         photoSourceFactory: PhotoSourceFactory,
         photoBufferManager: PhotoBufferManager,
+        photoDao: PhotoDao,
         @IoDispatcher ioDispatcher: CoroutineDispatcher
     ): MultiSourcePhotoRepositoryImpl {
-        return MultiSourcePhotoRepositoryImpl(photoSourcesManager, photoSourceFactory, photoBufferManager, ioDispatcher)
+        return MultiSourcePhotoRepositoryImpl(photoSourcesManager, photoSourceFactory, photoBufferManager, photoDao, ioDispatcher)
     }
 
     @Provides

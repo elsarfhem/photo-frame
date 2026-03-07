@@ -3,6 +3,7 @@ package com.photoframe.app.ui.slideshow
 import android.graphics.Bitmap
 import androidx.compose.runtime.Immutable
 import com.photoframe.core.model.Photo
+import com.photoframe.core.model.TransitionType
 
 /**
  * UI state for the slideshow screen.
@@ -17,6 +18,7 @@ import com.photoframe.core.model.Photo
  * @property isLoading True if photos are being loaded
  * @property error Error message if loading failed, null otherwise
  * @property bufferedPhotosCount Number of photos currently in buffer (for debugging)
+ * @property transitionType Type of transition effect between media
  */
 @Immutable
 data class SlideshowState(
@@ -27,13 +29,17 @@ data class SlideshowState(
     val isPlaying: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val bufferedPhotosCount: Int = 0
+    val bufferedPhotosCount: Int = 0,
+    val transitionType: TransitionType = TransitionType.DEFAULT
 ) {
     /**
-     * Returns true if slideshow is ready to display photos.
+     * Returns true if slideshow is ready to display media (photos or videos).
+     * For videos, currentPhoto will be null but currentPhotoMetadata.isVideo will be true.
      */
     val isReady: Boolean
-        get() = currentPhoto != null && !isLoading && error == null
+        get() = (currentPhoto != null || currentPhotoMetadata?.isVideo == true) &&
+                !isLoading &&
+                error == null
 
     /**
      * Returns true if slideshow has photos but none are displayed.

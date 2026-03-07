@@ -1,9 +1,11 @@
 package com.photoframe.app.ui.slideshow
 
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.photoframe.core.model.Result
+import com.photoframe.core.model.Photo
 import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.SlideshowWatchdog
@@ -87,21 +89,42 @@ class SlideshowViewModel @Inject constructor(
             }
         }
         // Observe repositories and update UI state
+        // All state flows from repository are observed reactively - no suspend calls needed
         viewModelScope.launch {
             combine(
                 slideshowRepository.currentPhoto,
+                slideshowRepository.currentPhotoMetadata,
+                slideshowRepository.currentPhotoIndex,
                 slideshowRepository.photos,
                 slideshowRepository.isLoading,
                 slideshowRepository.error
-            ) { currentPhoto, photos, isLoading, error ->
+            ) { values ->
+                val currentPhoto = values[0] as Bitmap?
+                val metadata = values[1] as Photo?
+                val photoIndex = values[2] as Int
+                val photos = values[3] as List<Photo>
+                val isLoading = values[4] as Boolean
+                val error = values[5] as String?
+
                 _state.value = _state.value.copy(
                     currentPhoto = currentPhoto,
-                    photoIndex = slideshowRepository.getCurrentPhotoIndex().coerceAtLeast(0),
+                    currentPhotoMetadata = metadata,
+                    photoIndex = photoIndex.coerceAtLeast(0),
                     totalPhotos = photos.size,
                     isLoading = isLoading,
                     error = error
                 )
             }.collect { }
+        }
+
+        // Load transition type from settings
+        viewModelScope.launch {
+            val settingsResult = settingsRepository.loadSlideshowSettings()
+            if (settingsResult is Result.Success) {
+                _state.value = _state.value.copy(
+                    transitionType = settingsResult.data.transitionType
+                )
+            }
         }
 
         // Monitor buffer state (for debugging)
@@ -117,14 +140,6 @@ class SlideshowViewModel @Inject constructor(
                 val totalPhotos = _state.value.totalPhotos
                 telemetryLogger.setSlideshowContext(currentIndex, totalPhotos, bufferSize)
             }
-        }
-
-        // Get current photo metadata
-        viewModelScope.launch {
-            val metadata = slideshowRepository.getCurrentPhotoMetadata()
-            _state.value = _state.value.copy(
-                currentPhotoMetadata = metadata
-            )
         }
 
         // Phase 4: Check if restarted after crash and restore state
@@ -315,16 +330,15 @@ class SlideshowViewModel @Inject constructor(
 
         viewModelScope.launch {
             val result = slideshowRepository.nextPhoto()
+            // Note: State updates now handled reactively by combine flow observing repository StateFlows
+
+            android.util.Log.d("SlideshowViewModel", "nextPhoto: result=${result.javaClass.simpleName}")
+
             when (result) {
                 is Result.Success -> {
-                    val metadata = slideshowRepository.getCurrentPhotoMetadata()
-                    val currentIndex = slideshowRepository.getCurrentPhotoIndex()
-                    _state.value = _state.value.copy(
-                        currentPhotoMetadata = metadata,
-                        error = null
-                    )
-
-                    // Phase 4: Save state for crash recovery (but not too frequently)
+                    // Combine flow will update state automatically from repository StateFlows
+                    // Just handle crash recovery state saving here
+                    val currentIndex = _state.value.photoIndex
                     if (currentIndex != lastSavedPhotoIndex) {
                         crashHandler.saveSlideshowState(
                             photoIndex = currentIndex,
@@ -336,17 +350,14 @@ class SlideshowViewModel @Inject constructor(
                 }
                 is Result.Error -> {
                     // Only show error if multiple consecutive photos failed (critical error)
-                    // Individual photo failures are auto-skipped by buffer manager
                     val errorMsg = result.message ?: "Failed to load next photo"
                     android.util.Log.e("SlideshowViewModel", "Critical error: $errorMsg")
 
                     // Log photo load failure
-                    val metadata = slideshowRepository.getCurrentPhotoMetadata()
-                    val photoPath = metadata?.path ?: "unknown"
+                    val photoPath = _state.value.currentPhotoMetadata?.path ?: "unknown"
                     telemetryLogger.logPhotoLoadFailed(photoPath, errorMsg)
 
                     // Only show error in UI if it's a critical failure (10+ consecutive failures)
-                    // Don't pause slideshow - user can manually stop if needed
                     if (errorMsg.contains("All recent photos failed")) {
                         _state.value = _state.value.copy(error = "Unable to load photos. Check network connection.")
                     }
@@ -373,15 +384,17 @@ class SlideshowViewModel @Inject constructor(
 
         viewModelScope.launch {
             val result = slideshowRepository.previousPhoto()
+            // Note: State updates now handled reactively by combine flow observing repository StateFlows
+
+            android.util.Log.d("SlideshowViewModel", "previousPhoto: result=${result.javaClass.simpleName}")
+
             when (result) {
                 is Result.Success -> {
-                    val metadata = slideshowRepository.getCurrentPhotoMetadata()
-                    _state.value = _state.value.copy(
-                        currentPhotoMetadata = metadata,
-                        error = null
-                    )
+                    // Combine flow will update state automatically from repository StateFlows
+                    // Success case handled reactively
                 }
                 is Result.Error -> {
+                    // Still need to handle error explicitly as it's not always from StateFlow
                     _state.value = _state.value.copy(
                         error = result.message ?: "Failed to load previous photo"
                     )

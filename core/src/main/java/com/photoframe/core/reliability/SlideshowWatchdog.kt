@@ -149,6 +149,10 @@ class SlideshowWatchdog : Service() {
                             handleStalledSlideshow()
                         }
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Coroutine was cancelled (normal shutdown) - exit loop
+                    android.util.Log.d(TAG, "Watchdog monitoring cancelled")
+                    throw e  // Re-throw to properly cancel the coroutine
                 } catch (e: Exception) {
                     android.util.Log.e(TAG, "Error in watchdog monitoring", e)
                     // TODO: Log to Crashlytics: "watchdog_monitoring_error"

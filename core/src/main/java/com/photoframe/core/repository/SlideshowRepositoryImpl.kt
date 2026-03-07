@@ -64,6 +64,14 @@ class SlideshowRepositoryImpl @Inject constructor(
     private val _currentPhoto = MutableStateFlow<Bitmap?>(null)
     override val currentPhoto: StateFlow<Bitmap?> = _currentPhoto.asStateFlow()
 
+    // Current photo metadata state
+    private val _currentPhotoMetadata = MutableStateFlow<Photo?>(null)
+    override val currentPhotoMetadata: StateFlow<Photo?> = _currentPhotoMetadata.asStateFlow()
+
+    // Current photo index state
+    private val _currentPhotoIndex = MutableStateFlow<Int>(-1)
+    override val currentPhotoIndex: StateFlow<Int> = _currentPhotoIndex.asStateFlow()
+
     // Loading state
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -72,7 +80,7 @@ class SlideshowRepositoryImpl @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     override val error: StateFlow<String?> = _error.asStateFlow()
 
-    // Current photo index
+    // Current photo index (internal tracking)
     private var currentIndex: Int = -1
 
     // Background scan job
@@ -90,7 +98,7 @@ class SlideshowRepositoryImpl @Inject constructor(
      * Thread Safety: Safe to call concurrently. Only one load operation at a time.
      */
     override suspend fun loadPhotos(shuffleEnabled: Boolean): Result<Int> = withContext(ioDispatcher) {
-        return@withContext mutex.withLock {
+        mutex.withLock {
             _isLoading.value = true
             _error.value = null
 
@@ -128,7 +136,11 @@ class SlideshowRepositoryImpl @Inject constructor(
                     val bufferResult = photoBufferManager.initialize(photoList, currentIndex)
                     if (bufferResult is Result.Success) {
                         val firstPhoto = photoBufferManager.getCurrentPhoto()
+
+                        // Update all state atomically
                         _currentPhoto.value = firstPhoto
+                        _currentPhotoMetadata.value = photoList.getOrNull(currentIndex)
+                        _currentPhotoIndex.value = currentIndex
                         _isLoading.value = false
 
                         // Start background sync to update DB
@@ -194,7 +206,11 @@ class SlideshowRepositoryImpl @Inject constructor(
 
                         // Get first photo
                         val firstPhoto = photoBufferManager.getCurrentPhoto()
+
+                        // Update all state atomically
                         _currentPhoto.value = firstPhoto
+                        _currentPhotoMetadata.value = photoList.getOrNull(currentIndex)
+                        _currentPhotoIndex.value = currentIndex
                         _isLoading.value = false
 
                         // Start background scan to populate DB
@@ -266,20 +282,22 @@ class SlideshowRepositoryImpl @Inject constructor(
                 )
             }
 
-            // Update current photo bitmap
+            // Update all state atomically
             val bitmap = photoBufferManager.getCurrentPhoto()
             _currentPhoto.value = bitmap
+            _currentPhotoMetadata.value = shuffled.getOrNull(currentIndex)
+            _currentPhotoIndex.value = currentIndex
 
             Result.success(shuffled.size)
         }
     }
 
     /**
-     * Advances to next photo.
+     * Advances to next media item (photo or video).
      *
      * Thread Safety: Safe to call concurrently.
      */
-    override suspend fun nextPhoto(): Result<Bitmap> = withContext(ioDispatcher) {
+    override suspend fun nextPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -293,8 +311,14 @@ class SlideshowRepositoryImpl @Inject constructor(
             val result = photoBufferManager.getNextPhoto()
             when (result) {
                 is Result.Success -> {
-                    currentIndex = (currentIndex + 1) % currentPhotos.size
+                    // Note: Don't increment index here - PhotoBufferManager already did it
+                    // Just sync our index with the buffer's index
+                    currentIndex = photoBufferManager.getCurrentIndex()
+
+                    // Update all state atomically
                     _currentPhoto.value = result.data
+                    _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
+                    _currentPhotoIndex.value = currentIndex
                     _error.value = null
                     Result.success(result.data)
                 }
@@ -313,11 +337,11 @@ class SlideshowRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Goes back to previous photo.
+     * Goes back to previous media item (photo or video).
      *
      * Thread Safety: Safe to call concurrently.
      */
-    override suspend fun previousPhoto(): Result<Bitmap> = withContext(ioDispatcher) {
+    override suspend fun previousPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -331,8 +355,14 @@ class SlideshowRepositoryImpl @Inject constructor(
             val result = photoBufferManager.getPreviousPhoto()
             when (result) {
                 is Result.Success -> {
-                    currentIndex = if (currentIndex == 0) currentPhotos.size - 1 else currentIndex - 1
+                    // Note: Don't decrement index here - PhotoBufferManager already did it
+                    // Just sync our index with the buffer's index
+                    currentIndex = photoBufferManager.getCurrentIndex()
+
+                    // Update all state atomically
                     _currentPhoto.value = result.data
+                    _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
+                    _currentPhotoIndex.value = currentIndex
                     _error.value = null
                     Result.success(result.data)
                 }
@@ -390,6 +420,8 @@ class SlideshowRepositoryImpl @Inject constructor(
 
             _photos.value = emptyList()
             _currentPhoto.value = null
+            _currentPhotoMetadata.value = null
+            _currentPhotoIndex.value = -1
             _isLoading.value = false
             _error.value = null
             currentIndex = -1

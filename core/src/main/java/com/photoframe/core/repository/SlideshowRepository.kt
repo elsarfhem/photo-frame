@@ -49,6 +49,20 @@ interface SlideshowRepository {
     val error: StateFlow<String?>
 
     /**
+     * StateFlow of current photo metadata.
+     * Emits the Photo object for the currently displayed media (photo or video).
+     * Updated atomically with currentPhoto when navigation occurs.
+     */
+    val currentPhotoMetadata: StateFlow<Photo?>
+
+    /**
+     * StateFlow of current photo index in the list.
+     * Emits the 0-based index of the current photo, or -1 if no photos loaded.
+     * Updated atomically with currentPhoto when navigation occurs.
+     */
+    val currentPhotoIndex: StateFlow<Int>
+
+    /**
      * Loads photos from the configured SMB share.
      * Initializes the photo buffer with loaded photos.
      *
@@ -76,24 +90,24 @@ interface SlideshowRepository {
     suspend fun shufflePhotos(): Result<Int>
 
     /**
-     * Advances to the next photo in the list.
+     * Advances to the next media item in the list (photo or video).
      * Wraps around to the beginning if at the end.
      *
      * Thread Safety: Safe to call concurrently.
      *
-     * @return Result.Success with next photo bitmap, Result.Error if failed
+     * @return Result.Success with next photo bitmap (or null for videos), Result.Error if failed
      */
-    suspend fun nextPhoto(): Result<Bitmap>
+    suspend fun nextPhoto(): Result<Bitmap?>
 
     /**
-     * Goes back to the previous photo in the list.
+     * Goes back to the previous media item in the list (photo or video).
      * Wraps around to the end if at the beginning.
      *
      * Thread Safety: Safe to call concurrently.
      *
-     * @return Result.Success with previous photo bitmap, Result.Error if failed
+     * @return Result.Success with previous photo bitmap (or null for videos), Result.Error if failed
      */
-    suspend fun previousPhoto(): Result<Bitmap>
+    suspend fun previousPhoto(): Result<Bitmap?>
 
     /**
      * Gets the current photo metadata.

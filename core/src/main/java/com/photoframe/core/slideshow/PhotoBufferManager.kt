@@ -18,20 +18,20 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages a 4-photo buffer for smooth slideshow playback.
+ * Manages a 5-photo buffer for smooth slideshow playback.
  *
- * Architecture: Implements ADR Decision 3 - 4-photo buffer pattern
- * Buffer Layout: [Current - 1, Current, Current + 1, Current + 2]
+ * Architecture: Implements ADR Decision 3 - 5-photo buffer pattern
+ * Buffer Layout: [Current - 1, Current, Current + 1, Current + 2, Current + 3]
  *
  * Thread Safety: All public methods are thread-safe using Mutex protection.
  * Safe to call from multiple coroutines concurrently.
  *
  * Performance:
  * - Background pre-loading on Dispatchers.IO
- * - LRU eviction when buffer exceeds 4 photos
+ * - LRU eviction when buffer exceeds 5 photos
  * - Concurrent bitmap loading using ImageCache
  *
- * Memory: ~64MB for 4 downsampled photos (2560x1600 @ ARGB_8888)
+ * Memory: ~80MB for 5 downsampled photos (2560x1600 @ ARGB_8888)
  *
  * @param imageCache Image loading and caching layer
  * @param ioDispatcher Coroutine dispatcher for I/O operations
@@ -138,18 +138,34 @@ class PhotoBufferManager @Inject constructor(
     }
 
     /**
-     * Advances to the next photo in the list.
+     * Gets the current photo index.
+     *
+     * Thread Safety: Safe to call concurrently.
+     *
+     * @return Current index in the photo list
+     */
+    suspend fun getCurrentIndex(): Int {
+        return mutex.withLock {
+            currentIndex
+        }
+    }
+
+    /**
+     * Advances to the next media item in the list (photo or video).
      * Wraps around to the beginning if at the end.
      * Triggers pre-loading of the next photo.
+     *
+     * Video Handling: Returns Result.Success(null) for videos without loading bitmap.
+     * Photo Handling: Loads bitmap with auto-retry mechanism.
      *
      * Auto-retry: If a photo fails to load, automatically tries the next one.
      * Silently skips failed photos without surfacing errors to UI.
      *
      * Thread Safety: Safe to call concurrently.
      *
-     * @return Result.Success with next photo bitmap, Result.Error if all photos failed
+     * @return Result.Success with next photo bitmap (or null for videos), Result.Error if all photos failed
      */
-    suspend fun getNextPhoto(): Result<Bitmap> {
+    suspend fun getNextPhoto(): Result<Bitmap?> {
         return mutex.withLock {
             if (photos.isEmpty()) {
                 return@withLock Result.error(
@@ -167,6 +183,15 @@ class PhotoBufferManager @Inject constructor(
                     currentIndex = (currentIndex + 1) % photos.size
 
                     val currentPhoto = photos[currentIndex]
+
+                    // Skip bitmap loading for videos
+                    if (currentPhoto.isVideo) {
+                        android.util.Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${currentPhoto.fileName}")
+                        preloadNext()
+                        _loadingState.value = BufferLoadingState.Ready
+                        return@withLock Result.success(null)
+                    }
+
                     val bitmap = buffer[currentPhoto.path]
 
                     if (bitmap != null) {
@@ -215,18 +240,21 @@ class PhotoBufferManager @Inject constructor(
     }
 
     /**
-     * Goes back to the previous photo in the list.
+     * Goes back to the previous media item in the list (photo or video).
      * Wraps around to the end if at the beginning.
      * Triggers pre-loading of the previous photo.
+     *
+     * Video Handling: Returns Result.Success(null) for videos without loading bitmap.
+     * Photo Handling: Loads bitmap with auto-retry mechanism.
      *
      * Auto-retry: If a photo fails to load, automatically tries the previous one.
      * Silently skips failed photos without surfacing errors to UI.
      *
      * Thread Safety: Safe to call concurrently.
      *
-     * @return Result.Success with previous photo bitmap, Result.Error if all photos failed
+     * @return Result.Success with previous photo bitmap (or null for videos), Result.Error if all photos failed
      */
-    suspend fun getPreviousPhoto(): Result<Bitmap> {
+    suspend fun getPreviousPhoto(): Result<Bitmap?> {
         return mutex.withLock {
             if (photos.isEmpty()) {
                 return@withLock Result.error(
@@ -244,6 +272,15 @@ class PhotoBufferManager @Inject constructor(
                     currentIndex = if (currentIndex == 0) photos.size - 1 else currentIndex - 1
 
                     val currentPhoto = photos[currentIndex]
+
+                    // Skip bitmap loading for videos
+                    if (currentPhoto.isVideo) {
+                        android.util.Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${currentPhoto.fileName}")
+                        preloadPrevious()
+                        _loadingState.value = BufferLoadingState.Ready
+                        return@withLock Result.success(null)
+                    }
+
                     val bitmap = buffer[currentPhoto.path]
 
                     if (bitmap != null) {
@@ -296,6 +333,7 @@ class PhotoBufferManager @Inject constructor(
      * Called automatically after navigation.
      *
      * Aggressive read-ahead ensures photos are ready before user reaches them.
+     * Skips videos (no bitmap to preload).
      *
      * Note: Must be called within mutex lock.
      */
@@ -306,6 +344,12 @@ class PhotoBufferManager @Inject constructor(
         for (i in 1..2) {
             val nextIndex = (currentIndex + i) % photos.size
             val photoToPreload = photos[nextIndex]
+
+            // Skip videos - no bitmap to preload
+            if (photoToPreload.isVideo) {
+                android.util.Log.d(TAG, "preloadNext: Skipping video preload: ${photoToPreload.fileName}")
+                continue
+            }
 
             // Only preload if not already in buffer or being loaded
             if (buffer.containsKey(photoToPreload.path) || preloadJobs.containsKey(photoToPreload.path)) {
@@ -342,6 +386,7 @@ class PhotoBufferManager @Inject constructor(
     /**
      * Pre-loads the previous 1-2 photos in the background.
      * Called automatically after backward navigation.
+     * Skips videos (no bitmap to preload).
      *
      * Note: Must be called within mutex lock.
      */
@@ -352,6 +397,12 @@ class PhotoBufferManager @Inject constructor(
         for (i in 1..1) {  // Only 1 previous for backward, since forward is more common
             val prevIndex = (currentIndex - i + photos.size) % photos.size
             val photoToPreload = photos[prevIndex]
+
+            // Skip videos - no bitmap to preload
+            if (photoToPreload.isVideo) {
+                android.util.Log.d(TAG, "preloadPrevious: Skipping video preload: ${photoToPreload.fileName}")
+                continue
+            }
 
             // Only preload if not already in buffer or being loaded
             if (buffer.containsKey(photoToPreload.path) || preloadJobs.containsKey(photoToPreload.path)) {
@@ -388,6 +439,7 @@ class PhotoBufferManager @Inject constructor(
     /**
      * Pre-loads the initial buffer on initialization.
      * Loads Current, Current + 1, and Current + 2.
+     * Skips videos (no bitmap to preload).
      *
      * Note: Must be called within mutex lock.
      */
@@ -397,27 +449,41 @@ class PhotoBufferManager @Inject constructor(
         // Pre-load current photo first (synchronous, blocking)
         val currentPhoto = photos[currentIndex]
         val job = CoroutineScope(ioDispatcher).launch {
-            when (val result = imageCache.load(currentPhoto.path)) {
-                is Result.Success -> {
-                    mutex.withLock {
-                        addToBuffer(currentPhoto.path, result.data)
-                        _loadingState.value = BufferLoadingState.Ready
-                    }
+            // Skip videos for current photo
+            if (currentPhoto.isVideo) {
+                android.util.Log.d(TAG, "preloadInitialBuffer: Current item is video, skipping bitmap load: ${currentPhoto.fileName}")
+                mutex.withLock {
+                    _loadingState.value = BufferLoadingState.Ready
                 }
-                is Result.Error -> {
-                    mutex.withLock {
-                        _loadingState.value = BufferLoadingState.Error(result.exception)
+            } else {
+                when (val result = imageCache.load(currentPhoto.path)) {
+                    is Result.Success -> {
+                        mutex.withLock {
+                            addToBuffer(currentPhoto.path, result.data)
+                            _loadingState.value = BufferLoadingState.Ready
+                        }
                     }
-                }
-                is Result.Loading -> {
-                    // Should not happen
+                    is Result.Error -> {
+                        mutex.withLock {
+                            _loadingState.value = BufferLoadingState.Error(result.exception)
+                        }
+                    }
+                    is Result.Loading -> {
+                        // Should not happen
+                    }
                 }
             }
 
-            // Pre-load next 2 photos in background
+            // Pre-load next 2 photos in background (skip videos)
             for (i in 1..2) {
                 val nextIndex = (currentIndex + i) % photos.size
                 val photo = photos[nextIndex]
+
+                // Skip videos
+                if (photo.isVideo) {
+                    android.util.Log.d(TAG, "preloadInitialBuffer: Skipping video: ${photo.fileName}")
+                    continue
+                }
 
                 if (!buffer.containsKey(photo.path)) {
                     when (val result = imageCache.load(photo.path)) {
@@ -442,7 +508,7 @@ class PhotoBufferManager @Inject constructor(
 
     /**
      * Adds a bitmap to the buffer, enforcing LRU eviction.
-     * Keeps buffer size at BUFFER_SIZE (4 photos).
+     * Keeps buffer size at BUFFER_SIZE (5 photos).
      *
      * Note: Must be called within mutex lock.
      *
@@ -497,10 +563,10 @@ class PhotoBufferManager @Inject constructor(
 
     companion object {
         /**
-         * Buffer size: 4 photos per ADR Decision 3.
-         * Layout: [Current - 1, Current, Current + 1, Current + 2]
+         * Buffer size: 5 photos for smooth playback.
+         * Layout: [Current - 1, Current, Current + 1, Current + 2, Current + 3]
          */
-        const val BUFFER_SIZE = 4
+        const val BUFFER_SIZE = 5
         private const val TAG = "PhotoBufferManager"
     }
 }

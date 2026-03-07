@@ -8,15 +8,12 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.lifecycle.lifecycleScope
 import com.photoframe.app.ui.settings.SettingsScreen
 import com.photoframe.app.ui.slideshow.SlideshowScreen
 import com.photoframe.app.ui.sources.SourcesScreen
@@ -170,32 +167,7 @@ fun PhotoFrameApp(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                // Triple-tap to navigate to settings from slideshow
-                var tapCount = 0
-                var lastTapTime = 0L
-
-                detectTapGestures(
-                    onTap = {
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastTapTime < 500) {
-                            tapCount++
-                            if (tapCount >= 2 && currentScreen is Screen.Slideshow) {
-                                // Triple tap detected
-                                currentScreen = Screen.Settings
-                                tapCount = 0
-                            }
-                        } else {
-                            tapCount = 1
-                        }
-                        lastTapTime = currentTime
-                    }
-                )
-            }
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         when (val screen = currentScreen) {
             is Screen.Loading -> {
                 // Show nothing while loading
@@ -203,7 +175,10 @@ fun PhotoFrameApp(
             is Screen.Slideshow -> {
                 SlideshowScreen(
                     shuffleEnabled = true,
-                    autoPlay = true
+                    autoPlay = true,
+                    onNavigateToSettings = {
+                        currentScreen = Screen.Settings
+                    }
                 )
             }
             is Screen.Settings -> {
