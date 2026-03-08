@@ -316,9 +316,11 @@ class SlideshowRepositoryImpl @Inject constructor(
                     currentIndex = photoBufferManager.getCurrentIndex()
 
                     // Update all state atomically
-                    _currentPhoto.value = result.data
+                    // CRITICAL: Set metadata and index BEFORE bitmap to prevent double slide-in
+                    // AnimatedContent key changes when metadata changes, so this must happen first
                     _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
                     _currentPhotoIndex.value = currentIndex
+                    _currentPhoto.value = result.data
                     _error.value = null
                     Result.success(result.data)
                 }
@@ -360,9 +362,11 @@ class SlideshowRepositoryImpl @Inject constructor(
                     currentIndex = photoBufferManager.getCurrentIndex()
 
                     // Update all state atomically
-                    _currentPhoto.value = result.data
+                    // CRITICAL: Set metadata and index BEFORE bitmap to prevent double slide-in
+                    // AnimatedContent key changes when metadata changes, so this must happen first
                     _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
                     _currentPhotoIndex.value = currentIndex
+                    _currentPhoto.value = result.data
                     _error.value = null
                     Result.success(result.data)
                 }

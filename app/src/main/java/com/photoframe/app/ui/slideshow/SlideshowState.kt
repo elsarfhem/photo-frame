@@ -6,6 +6,15 @@ import com.photoframe.core.model.Photo
 import com.photoframe.core.model.TransitionType
 
 /**
+ * Navigation direction for slideshow transitions.
+ * Used to determine slide direction (left/right).
+ */
+enum class NavigationDirection {
+    FORWARD,  // Next photo (slide from right to left)
+    BACKWARD  // Previous photo (slide from left to right)
+}
+
+/**
  * UI state for the slideshow screen.
  *
  * Thread Safety: Immutable data class, safe to share across threads.
@@ -32,7 +41,8 @@ data class SlideshowState(
     val bufferedPhotosCount: Int = 0,
     val transitionType: TransitionType = TransitionType.DEFAULT,
     val displayIntervalMillis: Long = 10_000L,
-    val panAnimationEnabled: Boolean = true
+    val panAnimationEnabled: Boolean = true,
+    val navigationDirection: NavigationDirection = NavigationDirection.FORWARD
 ) {
     /**
      * Returns true if slideshow is ready to display media (photos or videos).

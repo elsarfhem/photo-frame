@@ -330,6 +330,9 @@ class SlideshowViewModel @Inject constructor(
             pause()
         }
 
+        // Set navigation direction for transition animation
+        _state.value = _state.value.copy(navigationDirection = NavigationDirection.FORWARD)
+
         viewModelScope.launch {
             val result = slideshowRepository.nextPhoto()
             // Note: State updates now handled reactively by combine flow observing repository StateFlows
@@ -383,6 +386,9 @@ class SlideshowViewModel @Inject constructor(
         if (pauseAutoAdvance && _state.value.isPlaying) {
             pause()
         }
+
+        // Set navigation direction for transition animation
+        _state.value = _state.value.copy(navigationDirection = NavigationDirection.BACKWARD)
 
         viewModelScope.launch {
             val result = slideshowRepository.previousPhoto()

@@ -391,7 +391,7 @@ private fun MediaContent(
                 if (photoMetadata?.isVideo == true) {
                     EnterTransition.None togetherWith ExitTransition.None
                 } else {
-                    getTransitionSpec(transitionType)
+                    getTransitionSpec(transitionType, state.navigationDirection)
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -561,30 +561,49 @@ private fun ControlOverlay(
 private const val SWIPE_THRESHOLD = 100f
 
 /**
- * Returns the appropriate transition spec based on transition type.
+ * Returns the appropriate transition spec based on transition type and navigation direction.
+ *
+ * @param transitionType Type of transition effect
+ * @param navigationDirection Direction of navigation (FORWARD=next, BACKWARD=previous)
  */
-private fun getTransitionSpec(transitionType: com.photoframe.core.model.TransitionType): ContentTransform {
-    val duration = 600 // milliseconds
+private fun getTransitionSpec(
+    transitionType: com.photoframe.core.model.TransitionType,
+    navigationDirection: NavigationDirection
+): ContentTransform {
+    val fadeDuration = 600 // milliseconds for fade transitions
+    val slideDuration = 800 // milliseconds for slide transitions (longer for smoothness)
 
     return when (transitionType) {
         com.photoframe.core.model.TransitionType.FADE -> {
-            fadeIn(animationSpec = tween(duration)) togetherWith
-                    fadeOut(animationSpec = tween(duration))
+            fadeIn(animationSpec = tween(fadeDuration)) togetherWith
+                    fadeOut(animationSpec = tween(fadeDuration))
         }
         com.photoframe.core.model.TransitionType.SLIDE -> {
+            // Slide direction based on navigation:
+            // FORWARD (next): Slide in from right, slide out to left
+            // BACKWARD (previous): Slide in from left, slide out to right
+            val (slideInOffset, slideOutOffset) = when (navigationDirection) {
+                NavigationDirection.FORWARD -> {
+                    { fullWidth: Int -> fullWidth } to { fullWidth: Int -> -fullWidth }
+                }
+                NavigationDirection.BACKWARD -> {
+                    { fullWidth: Int -> -fullWidth } to { fullWidth: Int -> fullWidth }
+                }
+            }
+
             slideInHorizontally(
-                initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(duration)
-            ) + fadeIn(animationSpec = tween(duration)) togetherWith
+                initialOffsetX = slideInOffset,
+                animationSpec = tween(slideDuration)
+            ) togetherWith
                     slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> -fullWidth },
-                        animationSpec = tween(duration)
-                    ) + fadeOut(animationSpec = tween(duration))
+                        targetOffsetX = slideOutOffset,
+                        animationSpec = tween(slideDuration)
+                    )
         }
         com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS -> {
             // For Ken Burns, use fade transition (zoom is applied in ZoomTransition)
-            fadeIn(animationSpec = tween(duration)) togetherWith
-                    fadeOut(animationSpec = tween(duration))
+            fadeIn(animationSpec = tween(fadeDuration)) togetherWith
+                    fadeOut(animationSpec = tween(fadeDuration))
         }
     }
 }
