@@ -8,7 +8,7 @@ import java.time.LocalTime
  *
  * Thread Safety: Immutable data class, safe to share across threads.
  *
- * @property displayIntervalSeconds Number of seconds to display each photo (3-60 seconds)
+ * @property displayIntervalSeconds Number of seconds to display each photo (3-300 seconds)
  * @property transitionType Type of transition effect between photos
  * @property shuffleEnabled If true, photos are displayed in random order
  * @property scheduleEnabled If true, slideshow runs only during scheduled hours
@@ -39,7 +39,7 @@ data class SlideshowSettings(
 
     companion object {
         const val MIN_DISPLAY_INTERVAL = 3
-        const val MAX_DISPLAY_INTERVAL = 60
+        const val MAX_DISPLAY_INTERVAL = 300  // 5 minutes
         const val DEFAULT_DISPLAY_INTERVAL_SECONDS = 10
 
         val DEFAULT_START_TIME: LocalTime = LocalTime.of(8, 0)  // 8:00 AM

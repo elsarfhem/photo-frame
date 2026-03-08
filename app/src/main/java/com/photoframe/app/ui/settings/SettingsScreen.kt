@@ -2,14 +2,11 @@ package com.photoframe.app.ui.settings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,16 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.photoframe.core.model.TransitionType
 import java.time.format.DateTimeFormatter
 
 /**
- * Settings screen for configuring SMB connection, display settings, and schedule.
+ * Settings screen for configuring photo sources, display settings, and schedule.
  *
  * Material 3 design with form sections.
  * Phase 5: Settings & Scheduling
@@ -77,23 +71,9 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Photo Sources Section (NEW)
+            // Photo Sources Section
             PhotoSourcesSection(
                 onManageSources = onNavigateToSources
-            )
-
-            Divider()
-
-            // SMB Configuration Section (Legacy - kept for backwards compatibility)
-            SmbConfigSection(
-                state = state,
-                onServerChange = viewModel::updateSmbServer,
-                onShareChange = viewModel::updateSmbShare,
-                onUsernameChange = viewModel::updateSmbUsername,
-                onPasswordChange = viewModel::updateSmbPassword,
-                onDomainChange = viewModel::updateSmbDomain,
-                onTestConnection = viewModel::testConnection,
-                onDismissTestResult = viewModel::clearConnectionTestResult
             )
 
             Divider()
@@ -126,185 +106,6 @@ fun SettingsScreen(
                 onReset = viewModel::resetToDefaults,
                 onDismissSaveResult = viewModel::clearSaveResult
             )
-        }
-    }
-}
-
-@Composable
-private fun SmbConfigSection(
-    state: SettingsState,
-    onServerChange: (String) -> Unit,
-    onShareChange: (String) -> Unit,
-    onUsernameChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit,
-    onDomainChange: (String) -> Unit,
-    onTestConnection: () -> Unit,
-    onDismissTestResult: () -> Unit
-) {
-    var passwordVisible by remember { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = "SMB Configuration",
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.semantics { heading() }
-        )
-
-        // Server
-        OutlinedTextField(
-            value = state.smbServer,
-            onValueChange = onServerChange,
-            label = { Text("Server") },
-            placeholder = { Text("e.g., 192.168.1.100") },
-            isError = state.validationErrors.containsKey("smbServer"),
-            supportingText = {
-                state.validationErrors["smbServer"]?.let { Text(it) }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        // Share
-        OutlinedTextField(
-            value = state.smbShare,
-            onValueChange = onShareChange,
-            label = { Text("Share Name") },
-            placeholder = { Text("e.g., photos") },
-            isError = state.validationErrors.containsKey("smbShare"),
-            supportingText = {
-                state.validationErrors["smbShare"]?.let { Text(it) }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        // Username
-        OutlinedTextField(
-            value = state.smbUsername,
-            onValueChange = onUsernameChange,
-            label = { Text("Username") },
-            isError = state.validationErrors.containsKey("smbUsername"),
-            supportingText = {
-                state.validationErrors["smbUsername"]?.let { Text(it) }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        // Password
-        OutlinedTextField(
-            value = state.smbPassword,
-            onValueChange = onPasswordChange,
-            label = { Text("Password") },
-            isError = state.validationErrors.containsKey("smbPassword"),
-            supportingText = {
-                state.validationErrors["smbPassword"]?.let { Text(it) }
-            },
-            visualTransformation = if (passwordVisible) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
-            trailingIcon = {
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Icon(
-                        imageVector = if (passwordVisible) {
-                            Icons.Default.Visibility
-                        } else {
-                            Icons.Default.VisibilityOff
-                        },
-                        contentDescription = if (passwordVisible) "Hide password" else "Show password"
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
-        )
-
-        // Domain (optional)
-        OutlinedTextField(
-            value = state.smbDomain,
-            onValueChange = onDomainChange,
-            label = { Text("Domain (optional)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        // Test Connection Button
-        Button(
-            onClick = onTestConnection,
-            enabled = !state.isTestingConnection,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp) // Minimum touch target
-        ) {
-            if (state.isTestingConnection) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Testing Connection...")
-            } else {
-                Text("Test Connection")
-            }
-        }
-
-        // Connection Test Result
-        when (val result = state.connectionTestResult) {
-            is ConnectionTestResult.Success -> {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Connection successful!",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        TextButton(onClick = onDismissTestResult) {
-                            Text("Dismiss")
-                        }
-                    }
-                }
-            }
-            is ConnectionTestResult.Failure -> {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Connection failed",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = result.message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        TextButton(onClick = onDismissTestResult) {
-                            Text("Dismiss")
-                        }
-                    }
-                }
-            }
-            null -> {}
         }
     }
 }
@@ -733,7 +534,7 @@ private fun TimePickerDialog(
 }
 
 /**
- * Photo Sources section with button to manage sources.
+ * Photo Sources section with navigation to sources management screen.
  */
 @Composable
 private fun PhotoSourcesSection(
@@ -748,7 +549,7 @@ private fun PhotoSourcesSection(
         )
 
         Text(
-            text = "Manage where your photos come from (network shares, local storage, etc.)",
+            text = "Configure where your photos come from - network shares (SMB), local storage, and more.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
