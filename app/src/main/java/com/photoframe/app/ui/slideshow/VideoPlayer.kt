@@ -83,7 +83,7 @@ fun VideoPlayer(
                 PlayerView(ctx).apply {
                     player = exoPlayer
                     useController = false // Hide playback controls
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING) // Show spinner during loading
                 }
             },
             modifier = Modifier.fillMaxSize()

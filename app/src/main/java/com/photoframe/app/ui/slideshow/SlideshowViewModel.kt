@@ -291,8 +291,8 @@ class SlideshowViewModel @Inject constructor(
                 // Wait for interval
                 delay(interval)
 
-                // Advance to next photo
-                if (_state.value.isPlaying) {
+                // Advance to next photo (skip for videos - they advance via onVideoEnded callback)
+                if (_state.value.isPlaying && _state.value.currentPhotoMetadata?.isVideo != true) {
                     nextPhoto()
                 }
             }
