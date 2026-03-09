@@ -277,28 +277,7 @@ class SettingsViewModel @Inject constructor(
                 saveResult = null
             )
 
-            // Save SMB connection
-            val connection = SmbConnection(
-                serverUrl = currentState.smbServer,
-                sharePath = currentState.smbShare,
-                username = currentState.smbUsername,
-                domain = currentState.smbDomain.ifBlank { null }
-            )
-
-            val smbResult = settingsRepository.saveSmbConnection(
-                connection,
-                currentState.smbPassword
-            )
-
-            if (smbResult is Result.Error) {
-                _state.value = _state.value.copy(
-                    isSaving = false,
-                    saveResult = SaveResult.Failure(
-                        smbResult.message ?: "Failed to save SMB connection"
-                    )
-                )
-                return@launch
-            }
+            // SMB connection save removed - SMB config now managed in separate Photo Sources screen
 
             // Save slideshow settings
             val slideshowSettings = SlideshowSettings(
@@ -363,10 +342,7 @@ class SettingsViewModel @Inject constructor(
      * @return True if all fields are valid
      */
     private fun validateAllFields(): Boolean {
-        validateSmbServer()
-        validateSmbShare()
-        validateSmbUsername()
-        validateSmbPassword()
+        // SMB validation removed - SMB config now managed in separate Photo Sources screen
         validateDisplayInterval()
         validateScheduleTimes()
 

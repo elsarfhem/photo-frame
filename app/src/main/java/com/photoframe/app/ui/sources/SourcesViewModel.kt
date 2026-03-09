@@ -75,6 +75,25 @@ class SourcesViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isSaving = true, error = null) }
 
+            // Validate required fields
+            val validationError = when {
+                server.isBlank() -> "Server is required"
+                share.isBlank() -> "Share is required"
+                username.isBlank() -> "Username is required"
+                password.isBlank() -> "Password is required"
+                else -> null
+            }
+
+            if (validationError != null) {
+                _state.update {
+                    it.copy(
+                        isSaving = false,
+                        error = validationError
+                    )
+                }
+                return@launch
+            }
+
             // Generate unique ID
             val sourceId = "smb-${System.currentTimeMillis()}"
 
@@ -380,6 +399,24 @@ class SourcesViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             _state.update { it.copy(isSaving = true, error = null) }
+
+            // Validate required fields (password is optional on edit)
+            val validationError = when {
+                server.isBlank() -> "Server is required"
+                share.isBlank() -> "Share is required"
+                username.isBlank() -> "Username is required"
+                else -> null
+            }
+
+            if (validationError != null) {
+                _state.update {
+                    it.copy(
+                        isSaving = false,
+                        error = validationError
+                    )
+                }
+                return@launch
+            }
 
             // Create updated source config
             val sourceConfig = PhotoSourceConfig.createSmb(

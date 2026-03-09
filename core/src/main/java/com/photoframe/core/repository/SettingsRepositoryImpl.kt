@@ -151,6 +151,10 @@ class SettingsRepositoryImpl @Inject constructor(
                     prefs[KEY_DISPLAY_INTERVAL] = settings.displayIntervalSeconds
                     prefs[KEY_SHUFFLE] = if (settings.shuffleEnabled) 1 else 0
                     prefs[KEY_TRANSITION_TYPE] = settings.transitionType.name
+                    prefs[KEY_PAN_ANIMATION] = if (settings.panAnimationEnabled) 1 else 0
+                    prefs[KEY_SCHEDULE_ENABLED] = if (settings.scheduleEnabled) 1 else 0
+                    prefs[KEY_SCHEDULE_START_TIME] = settings.scheduleStartTime.toString()
+                    prefs[KEY_SCHEDULE_END_TIME] = settings.scheduleEndTime.toString()
                 }
 
                 // Update StateFlow
@@ -169,6 +173,8 @@ class SettingsRepositoryImpl @Inject constructor(
             val displayInterval = prefs[KEY_DISPLAY_INTERVAL] ?: SlideshowSettings.DEFAULT.displayIntervalSeconds
             val shuffleEnabled = (prefs[KEY_SHUFFLE] ?: 0) == 1
             val transitionTypeName = prefs[KEY_TRANSITION_TYPE] ?: TransitionType.FADE.name
+            val panAnimationEnabled = (prefs[KEY_PAN_ANIMATION] ?: 1) == 1 // Default to true
+            val scheduleEnabled = (prefs[KEY_SCHEDULE_ENABLED] ?: 0) == 1
 
             val transitionType = try {
                 TransitionType.valueOf(transitionTypeName)
@@ -176,10 +182,28 @@ class SettingsRepositoryImpl @Inject constructor(
                 TransitionType.FADE // Default if invalid value
             }
 
+            val scheduleStartTime = try {
+                prefs[KEY_SCHEDULE_START_TIME]?.let { java.time.LocalTime.parse(it) }
+                    ?: SlideshowSettings.DEFAULT.scheduleStartTime
+            } catch (e: Exception) {
+                SlideshowSettings.DEFAULT.scheduleStartTime
+            }
+
+            val scheduleEndTime = try {
+                prefs[KEY_SCHEDULE_END_TIME]?.let { java.time.LocalTime.parse(it) }
+                    ?: SlideshowSettings.DEFAULT.scheduleEndTime
+            } catch (e: Exception) {
+                SlideshowSettings.DEFAULT.scheduleEndTime
+            }
+
             val settings = SlideshowSettings(
                 displayIntervalSeconds = displayInterval,
                 shuffleEnabled = shuffleEnabled,
-                transitionType = transitionType
+                transitionType = transitionType,
+                panAnimationEnabled = panAnimationEnabled,
+                scheduleEnabled = scheduleEnabled,
+                scheduleStartTime = scheduleStartTime,
+                scheduleEndTime = scheduleEndTime
             )
 
             // Update StateFlow
@@ -223,6 +247,10 @@ class SettingsRepositoryImpl @Inject constructor(
         private val KEY_DISPLAY_INTERVAL = intPreferencesKey("display_interval_seconds")
         private val KEY_SHUFFLE = intPreferencesKey("shuffle")
         private val KEY_TRANSITION_TYPE = stringPreferencesKey("transition_type")
+        private val KEY_PAN_ANIMATION = intPreferencesKey("pan_animation_enabled")
+        private val KEY_SCHEDULE_ENABLED = intPreferencesKey("schedule_enabled")
+        private val KEY_SCHEDULE_START_TIME = stringPreferencesKey("schedule_start_time")
+        private val KEY_SCHEDULE_END_TIME = stringPreferencesKey("schedule_end_time")
 
         // DataStore keys for app state
         private val KEY_FIRST_LAUNCH = booleanPreferencesKey("first_launch")

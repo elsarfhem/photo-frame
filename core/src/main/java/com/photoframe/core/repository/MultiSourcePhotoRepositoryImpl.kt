@@ -170,12 +170,13 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                         photoList = fisherYatesShuffle(photoList)
                     }
 
-                    _photos.value = photoList
+                    // Initialize buffer BEFORE setting _photos to prevent state desync
                     currentIndex = 0
-
-                    // Initialize buffer
                     val bufferResult = photoBufferManager.initialize(photoList, currentIndex)
                     if (bufferResult is Result.Success) {
+                        // Only set _photos AFTER buffer initialization succeeds
+                        _photos.value = photoList
+
                         val firstPhoto = photoBufferManager.getCurrentPhoto()
                         _currentPhoto.value = firstPhoto
                         _currentPhotoMetadata.value = photoList.getOrNull(currentIndex)
@@ -186,6 +187,11 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                         startBackgroundSync(sourceConfigs, shuffleEnabled)
 
                         return@withContext Result.success(photoList.size)
+                    } else {
+                        // Buffer init failed - clear state and fall through to scan missing sources
+                        Log.w(TAG, "loadPhotos: Buffer initialization failed for cached photos, will scan sources")
+                        _photos.value = emptyList()
+                        currentIndex = -1
                     }
                 }
 
@@ -218,11 +224,8 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     allPhotos
                 }
 
-                // Update state
-                _photos.value = finalPhotos
+                // Initialize buffer BEFORE setting _photos to prevent state desync
                 currentIndex = 0
-
-                // Initialize buffer
                 val bufferResult = photoBufferManager.initialize(finalPhotos, currentIndex)
                 if (bufferResult !is Result.Success) {
                     val errorMsg = if (bufferResult is Result.Error) {
@@ -232,6 +235,9 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     }
                     throw Exception("Failed to initialize buffer: $errorMsg")
                 }
+
+                // Only set _photos AFTER buffer initialization succeeds
+                _photos.value = finalPhotos
 
                 // Get first photo
                 val firstPhoto = photoBufferManager.getCurrentPhoto()
@@ -420,7 +426,8 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     Result.success(result.data)
                 }
                 is Result.Error -> {
-                    _error.value = "Failed to load next photo: ${result.message}"
+                    // Don't propagate internal buffer errors to UI via _error StateFlow
+                    // Return the error via Result.Error for proper handling by ViewModel
                     Result.error(result.exception, result.message ?: "Failed to load next photo")
                 }
                 is Result.Loading -> {
@@ -456,7 +463,8 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     Result.success(result.data)
                 }
                 is Result.Error -> {
-                    _error.value = "Failed to load previous photo: ${result.message}"
+                    // Don't propagate internal buffer errors to UI via _error StateFlow
+                    // Return the error via Result.Error for proper handling by ViewModel
                     Result.error(result.exception, result.message ?: "Failed to load previous photo")
                 }
                 is Result.Loading -> {

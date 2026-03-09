@@ -81,6 +81,9 @@ class SlideshowViewModel @Inject constructor(
     // State persistence for crash recovery
     private var lastSavedPhotoIndex = -1
 
+    // Initialization flag to filter transient errors during startup
+    private var isInitialized = false
+
     init {
         // Phase 4: Monitor network state for auto-recovery
         viewModelScope.launch {
@@ -106,26 +109,40 @@ class SlideshowViewModel @Inject constructor(
                 val isLoading = values[4] as Boolean
                 val error = values[5] as String?
 
+                // Filter out buffer-level initialization errors before slideshow is initialized
+                // These are transient states that should not be shown to users
+                val filteredError = if (!isInitialized && error?.contains("Call initialize() before") == true) {
+                    null // Suppress initialization error until initialize() is called
+                } else {
+                    error
+                }
+
                 _state.value = _state.value.copy(
                     currentPhoto = currentPhoto,
                     currentPhotoMetadata = metadata,
                     photoIndex = photoIndex.coerceAtLeast(0),
                     totalPhotos = photos.size,
                     isLoading = isLoading,
-                    error = error
+                    error = filteredError
                 )
             }.collect { }
         }
 
-        // Load transition type and display interval from settings
+        // Load settings and initialize slideshow automatically
         viewModelScope.launch {
             val settingsResult = settingsRepository.loadSlideshowSettings()
             if (settingsResult is Result.Success) {
+                val settings = settingsResult.data
                 _state.value = _state.value.copy(
-                    transitionType = settingsResult.data.transitionType,
-                    displayIntervalMillis = settingsResult.data.displayIntervalMillis,
-                    panAnimationEnabled = settingsResult.data.panAnimationEnabled
+                    transitionType = settings.transitionType,
+                    displayIntervalMillis = settings.displayIntervalMillis,
+                    panAnimationEnabled = settings.panAnimationEnabled
                 )
+
+                // Initialize slideshow with settings-based shuffle and auto-play
+                // This eliminates the timing gap where LaunchedEffect would be used
+                initialize(shuffleEnabled = settings.shuffleEnabled, autoPlay = true)
+                isInitialized = true
             }
         }
 
@@ -326,6 +343,12 @@ class SlideshowViewModel @Inject constructor(
      * @param pauseAutoAdvance If true, pauses auto-advance (default true for manual navigation)
      */
     fun nextPhoto(pauseAutoAdvance: Boolean = false) {
+        // Guard: Don't allow navigation before initialization completes
+        if (!isInitialized) {
+            android.util.Log.w("SlideshowViewModel", "nextPhoto called before initialization, ignoring")
+            return
+        }
+
         if (pauseAutoAdvance && _state.value.isPlaying) {
             pause()
         }
@@ -383,6 +406,12 @@ class SlideshowViewModel @Inject constructor(
      * @param pauseAutoAdvance If true, pauses auto-advance (default true for manual navigation)
      */
     fun previousPhoto(pauseAutoAdvance: Boolean = false) {
+        // Guard: Don't allow navigation before initialization completes
+        if (!isInitialized) {
+            android.util.Log.w("SlideshowViewModel", "previousPhoto called before initialization, ignoring")
+            return
+        }
+
         if (pauseAutoAdvance && _state.value.isPlaying) {
             pause()
         }

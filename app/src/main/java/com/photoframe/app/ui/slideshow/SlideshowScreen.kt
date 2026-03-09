@@ -79,15 +79,15 @@ import kotlin.math.abs
  * Architecture: Observes SlideshowViewModel state via StateFlow.
  *
  * @param viewModel Slideshow view model (injected via Hilt)
- * @param shuffleEnabled If true, shuffles photos on initialization
- * @param autoPlay If true, starts auto-advance on initialization
+ * @param shuffleEnabled DEPRECATED: No longer used. Shuffle is controlled by saved settings.
+ * @param autoPlay DEPRECATED: No longer used. Auto-play always enabled via ViewModel init.
  * @param onNavigateToSettings Callback to navigate to settings screen
  */
 @Composable
 fun SlideshowScreen(
     viewModel: SlideshowViewModel = hiltViewModel(),
-    shuffleEnabled: Boolean = false,
-    autoPlay: Boolean = true,
+    @Suppress("UNUSED_PARAMETER") shuffleEnabled: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") autoPlay: Boolean = true,
     onNavigateToSettings: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -106,11 +106,9 @@ fun SlideshowScreen(
     // Hide system UI (immersive mode)
     HideSystemUI()
 
-    // Initialize slideshow on first composition
-    // autoPlay is passed to initialize() to avoid race condition
-    LaunchedEffect(Unit) {
-        viewModel.initialize(shuffleEnabled, autoPlay)
-    }
+    // Note: Slideshow initialization moved to ViewModel's init block to eliminate
+    // timing gap where combine flow could propagate buffer errors before initialization.
+    // The ViewModel now auto-initializes based on settings (shuffle + auto-play).
 
     // Main container
     Box(
