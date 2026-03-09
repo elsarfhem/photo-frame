@@ -88,44 +88,61 @@ object RawImageDecoder {
     /**
      * Extracts embedded JPEG preview from RAW file.
      *
-     * Most RAW files contain an embedded JPEG preview that we can extract.
-     * This is much faster than full RAW processing and doesn't require libraw.
+     * Most RAW files contain multiple embedded JPEGs (thumbnail, preview, full-size preview).
+     * This finds the largest one for best quality display.
      */
     private fun extractEmbeddedJpeg(bytes: ByteArray, extension: String): Result<Bitmap> {
         try {
-            // Look for JPEG markers in the RAW file
-            // JPEG starts with FF D8 and ends with FF D9
-            val jpegStart = findJpegStart(bytes)
-            val jpegEnd = findJpegEnd(bytes, jpegStart)
+            // Find ALL embedded JPEGs in the RAW file
+            val jpegRegions = findAllJpegs(bytes)
 
-            if (jpegStart >= 0 && jpegEnd > jpegStart) {
-                // Extract JPEG bytes
-                val jpegBytes = bytes.copyOfRange(jpegStart, jpegEnd + 2)
+            if (jpegRegions.isEmpty()) {
+                Log.w(TAG, "No JPEG preview found in $extension file")
+                return Result.error(
+                    IllegalStateException("No JPEG preview found"),
+                    "RAW file does not contain embedded JPEG preview"
+                )
+            }
 
-                // Decode JPEG
-                val options = BitmapFactory.Options().apply {
-                    // Downsample if needed
-                    inJustDecodeBounds = true
-                }
-                BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
+            // Try each JPEG, starting with the largest
+            for (region in jpegRegions.sortedByDescending { it.size }) {
+                try {
+                    val jpegBytes = bytes.copyOfRange(region.start, region.end + 2)
 
-                // Calculate sample size
-                val maxSize = 2560
-                options.inSampleSize = calculateInSampleSize(options, maxSize, maxSize)
-                options.inJustDecodeBounds = false
+                    // Check if this JPEG is decodable and reasonably sized
+                    val options = BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                    }
+                    BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
 
-                val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
+                    // Skip tiny thumbnails (< 200px on either dimension)
+                    if (options.outWidth < 200 || options.outHeight < 200) {
+                        Log.d(TAG, "Skipping tiny thumbnail (${options.outWidth}x${options.outHeight})")
+                        continue
+                    }
 
-                if (bitmap != null) {
-                    Log.d(TAG, "Extracted JPEG preview from $extension (${bitmap.width}x${bitmap.height})")
-                    return Result.success(bitmap)
+                    // Decode the JPEG
+                    val maxSize = 2560
+                    options.inSampleSize = calculateInSampleSize(options, maxSize, maxSize)
+                    options.inJustDecodeBounds = false
+
+                    val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
+
+                    if (bitmap != null) {
+                        Log.d(TAG, "Extracted JPEG preview from $extension (${bitmap.width}x${bitmap.height})")
+                        return Result.success(bitmap)
+                    }
+                } catch (e: Exception) {
+                    // Try next JPEG region
+                    Log.d(TAG, "Failed to decode JPEG region, trying next: ${e.message}")
+                    continue
                 }
             }
 
-            Log.w(TAG, "No JPEG preview found in $extension file")
+            Log.w(TAG, "No usable JPEG preview found in $extension file")
             return Result.error(
-                IllegalStateException("No JPEG preview found"),
-                "RAW file does not contain embedded JPEG preview"
+                IllegalStateException("No usable JPEG preview found"),
+                "RAW file previews are too small or corrupted"
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to extract JPEG from $extension: ${e.message}", e)
@@ -134,10 +151,51 @@ object RawImageDecoder {
     }
 
     /**
-     * Finds the start of JPEG data (FF D8 marker).
+     * Data class representing a JPEG region within a RAW file.
      */
-    private fun findJpegStart(bytes: ByteArray): Int {
-        for (i in 0 until bytes.size - 1) {
+    private data class JpegRegion(val start: Int, val end: Int) {
+        val size: Int get() = end - start
+    }
+
+    /**
+     * Finds ALL embedded JPEGs in the RAW file.
+     * RAW files typically contain multiple JPEGs (thumbnail, preview, full preview).
+     */
+    private fun findAllJpegs(bytes: ByteArray): List<JpegRegion> {
+        val regions = mutableListOf<JpegRegion>()
+        var searchPos = 0
+        var jpegStartsFound = 0
+
+        while (searchPos < bytes.size - 1) {
+            // Find next JPEG start marker (FF D8)
+            val start = findJpegStart(bytes, searchPos)
+            if (start < 0) break
+
+            jpegStartsFound++
+
+            // Find corresponding end marker (FF D9)
+            val end = findJpegEnd(bytes, start)
+            if (end > start) {
+                val size = end - start + 2
+                Log.d(TAG, "Found JPEG region at offset $start, size: ${size / 1024}KB")
+                regions.add(JpegRegion(start, end))
+                searchPos = end + 2
+            } else {
+                // No valid end found, move past this start marker
+                Log.d(TAG, "Found JPEG start at $start but no valid end marker")
+                searchPos = start + 2
+            }
+        }
+
+        Log.d(TAG, "Found ${regions.size} complete JPEG regions out of $jpegStartsFound JPEG starts (file size: ${bytes.size / 1024}KB)")
+        return regions
+    }
+
+    /**
+     * Finds the start of JPEG data (FF D8 marker) starting from given position.
+     */
+    private fun findJpegStart(bytes: ByteArray, startPos: Int = 0): Int {
+        for (i in startPos until bytes.size - 1) {
             if (bytes[i] == 0xFF.toByte() && bytes[i + 1] == 0xD8.toByte()) {
                 return i
             }
@@ -146,10 +204,15 @@ object RawImageDecoder {
     }
 
     /**
-     * Finds the end of JPEG data (FF D9 marker).
+     * Finds the end of JPEG data (FF D9 marker) starting from given position.
+     * Also enforces maximum search distance to avoid false positives.
      */
     private fun findJpegEnd(bytes: ByteArray, startPos: Int): Int {
-        for (i in startPos until bytes.size - 1) {
+        // Limit search to 50MB to avoid scanning entire RAW file for corrupted JPEGs
+        val maxSearchDistance = 50 * 1024 * 1024
+        val searchLimit = minOf(startPos + maxSearchDistance, bytes.size - 1)
+
+        for (i in startPos until searchLimit) {
             if (bytes[i] == 0xFF.toByte() && bytes[i + 1] == 0xD9.toByte()) {
                 return i
             }

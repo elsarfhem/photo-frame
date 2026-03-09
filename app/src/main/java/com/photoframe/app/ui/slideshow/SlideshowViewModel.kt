@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.photoframe.core.model.Result
 import com.photoframe.core.model.Photo
+import com.photoframe.core.model.SlideshowSettings
 import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.SlideshowWatchdog
@@ -143,6 +144,49 @@ class SlideshowViewModel @Inject constructor(
                 // This eliminates the timing gap where LaunchedEffect would be used
                 initialize(shuffleEnabled = settings.shuffleEnabled, autoPlay = true)
                 isInitialized = true
+            }
+        }
+
+        // Observe settings changes and apply them dynamically to running slideshow
+        viewModelScope.launch {
+            var isFirstEmission = true
+
+            settingsRepository.slideshowSettings.collect { settings ->
+                // Skip the first emission (initial settings load at app start)
+                if (isFirstEmission) {
+                    isFirstEmission = false
+                    return@collect
+                }
+
+                android.util.Log.d("SlideshowViewModel", "Settings changed, applying dynamically")
+
+                // Update UI state with new settings
+                _state.value = _state.value.copy(
+                    transitionType = settings.transitionType,
+                    displayIntervalMillis = settings.displayIntervalMillis,
+                    panAnimationEnabled = settings.panAnimationEnabled
+                )
+
+                // Only apply changes if slideshow is initialized and has photos
+                if (!isInitialized || _state.value.totalPhotos == 0) {
+                    android.util.Log.d("SlideshowViewModel", "Slideshow not ready, skipping settings application")
+                    return@collect
+                }
+
+                val wasPlaying = _state.value.isPlaying
+
+                // Apply shuffle if it's currently enabled (re-shuffle on any settings save)
+                if (settings.shuffleEnabled) {
+                    android.util.Log.d("SlideshowViewModel", "Shuffle is enabled - reshuffling photos")
+                    shuffle()
+                }
+
+                // Restart auto-advance if playing to apply new display interval immediately
+                if (wasPlaying) {
+                    android.util.Log.d("SlideshowViewModel", "Restarting auto-advance with new settings")
+                    pause()
+                    play()
+                }
             }
         }
 
