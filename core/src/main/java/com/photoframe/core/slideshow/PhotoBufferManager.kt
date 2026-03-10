@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -161,82 +162,98 @@ class PhotoBufferManager @Inject constructor(
      * Auto-retry: If a photo fails to load, automatically tries the next one.
      * Silently skips failed photos without surfacing errors to UI.
      *
-     * Thread Safety: Safe to call concurrently.
+     * Thread Safety: Safe to call concurrently. Mutex is released during IO operations.
      *
      * @return Result.Success with next photo bitmap (or null for videos), Result.Error if all photos failed
      */
     suspend fun getNextPhoto(): Result<Bitmap?> {
-        return mutex.withLock {
-            if (photos.isEmpty()) {
-                return@withLock Result.error(
-                    IllegalStateException("Buffer not initialized"),
-                    "Call initialize() before getting photos"
-                )
-            }
+        // Reduce retries from 10 to 3 as we now have timeouts
+        val maxRetries = 3
+        var retriesSoFar = 0
 
-            val maxRetries = 10
-            var retriesSoFar = 0
+        while (retriesSoFar < maxRetries) {
+            try {
+                // STEP 1: Acquire mutex, read state, release mutex
+                val photoToLoad: Photo
+                val isInBuffer: Boolean
 
-            while (retriesSoFar < maxRetries) {
-                try {
+                mutex.withLock {
+                    if (photos.isEmpty()) {
+                        return Result.error(
+                            IllegalStateException("Buffer not initialized"),
+                            "Call initialize() before getting photos"
+                        )
+                    }
+
                     // Advance to next index (wrap around)
                     currentIndex = (currentIndex + 1) % photos.size
+                    photoToLoad = photos[currentIndex]
+                    isInBuffer = buffer.containsKey(photoToLoad.path)
 
-                    val currentPhoto = photos[currentIndex]
-
-                    // Skip bitmap loading for videos
-                    if (currentPhoto.isVideo) {
-                        android.util.Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${currentPhoto.fileName}")
+                    // Handle videos immediately
+                    if (photoToLoad.isVideo) {
+                        android.util.Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
                         preloadNext()
                         _loadingState.value = BufferLoadingState.Ready
-                        return@withLock Result.success(null)
+                        return Result.success(null)
                     }
 
-                    val bitmap = buffer[currentPhoto.path]
-
-                    if (bitmap != null) {
-                        // Photo already in buffer, pre-load next
+                    // If in buffer, return it
+                    if (isInBuffer) {
+                        val bitmap = buffer[photoToLoad.path]
                         preloadNext()
                         _loadingState.value = BufferLoadingState.Ready
-                        return@withLock Result.success(bitmap)
-                    } else {
-                        // Photo not in buffer, load it synchronously
-                        _loadingState.value = BufferLoadingState.Loading
-                        when (val result = imageCache.load(currentPhoto.path)) {
-                            is Result.Success -> {
-                                addToBuffer(currentPhoto.path, result.data)
-                                preloadNext()
-                                _loadingState.value = BufferLoadingState.Ready
-                                return@withLock Result.success(result.data)
-                            }
-                            is Result.Error -> {
-                                // Log error but try next photo silently
-                                android.util.Log.w(TAG, "Failed to load ${currentPhoto.fileName}, trying next photo: ${result.message}")
-                                retriesSoFar++
-                                // Continue loop to try next photo
-                            }
-                            is Result.Loading -> {
-                                // Unexpected state, try next photo
-                                android.util.Log.w(TAG, "Unexpected loading state for ${currentPhoto.fileName}, trying next")
-                                retriesSoFar++
-                                // Continue loop to try next photo
-                            }
-                        }
+                        return Result.success(bitmap)
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Exception getting next photo: ${e.message}, trying next")
-                    retriesSoFar++
-                    // Continue loop to try next photo
+
+                    // Mark as loading before releasing mutex
+                    _loadingState.value = BufferLoadingState.Loading
                 }
-            }
 
-            // All retries failed
-            _loadingState.value = BufferLoadingState.Error(IllegalStateException("Failed to load photo after $maxRetries attempts"))
-            return@withLock Result.error(
-                IllegalStateException("Failed to load photo after $maxRetries attempts"),
-                "All recent photos failed to load"
-            )
+                // STEP 2: Load photo WITHOUT holding mutex (with timeout)
+                val loadResult = try {
+                    withTimeout(PHOTO_LOAD_TIMEOUT_MS) {
+                        imageCache.load(photoToLoad.path)
+                    }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${PHOTO_LOAD_TIMEOUT_MS}ms, trying next")
+                    retriesSoFar++
+                    continue
+                }
+
+                // STEP 3: Reacquire mutex, update buffer, release mutex
+                when (loadResult) {
+                    is Result.Success -> {
+                        mutex.withLock {
+                            addToBuffer(photoToLoad.path, loadResult.data)
+                            preloadNext()
+                            _loadingState.value = BufferLoadingState.Ready
+                        }
+                        return Result.success(loadResult.data)
+                    }
+                    is Result.Error -> {
+                        android.util.Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying next photo: ${loadResult.message}")
+                        retriesSoFar++
+                    }
+                    is Result.Loading -> {
+                        android.util.Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying next")
+                        retriesSoFar++
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Exception getting next photo: ${e.message}, trying next")
+                retriesSoFar++
+            }
         }
+
+        // All retries failed
+        mutex.withLock {
+            _loadingState.value = BufferLoadingState.Error(IllegalStateException("Failed to load photo after $maxRetries attempts"))
+        }
+        return Result.error(
+            IllegalStateException("Failed to load photo after $maxRetries attempts"),
+            "All recent photos failed to load"
+        )
     }
 
     /**
@@ -250,82 +267,98 @@ class PhotoBufferManager @Inject constructor(
      * Auto-retry: If a photo fails to load, automatically tries the previous one.
      * Silently skips failed photos without surfacing errors to UI.
      *
-     * Thread Safety: Safe to call concurrently.
+     * Thread Safety: Safe to call concurrently. Mutex is released during IO operations.
      *
      * @return Result.Success with previous photo bitmap (or null for videos), Result.Error if all photos failed
      */
     suspend fun getPreviousPhoto(): Result<Bitmap?> {
-        return mutex.withLock {
-            if (photos.isEmpty()) {
-                return@withLock Result.error(
-                    IllegalStateException("Buffer not initialized"),
-                    "Call initialize() before getting photos"
-                )
-            }
+        // Reduce retries from 10 to 3 as we now have timeouts
+        val maxRetries = 3
+        var retriesSoFar = 0
 
-            val maxRetries = 10
-            var retriesSoFar = 0
+        while (retriesSoFar < maxRetries) {
+            try {
+                // STEP 1: Acquire mutex, read state, release mutex
+                val photoToLoad: Photo
+                val isInBuffer: Boolean
 
-            while (retriesSoFar < maxRetries) {
-                try {
+                mutex.withLock {
+                    if (photos.isEmpty()) {
+                        return Result.error(
+                            IllegalStateException("Buffer not initialized"),
+                            "Call initialize() before getting photos"
+                        )
+                    }
+
                     // Go back to previous index (wrap around)
                     currentIndex = if (currentIndex == 0) photos.size - 1 else currentIndex - 1
+                    photoToLoad = photos[currentIndex]
+                    isInBuffer = buffer.containsKey(photoToLoad.path)
 
-                    val currentPhoto = photos[currentIndex]
-
-                    // Skip bitmap loading for videos
-                    if (currentPhoto.isVideo) {
-                        android.util.Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${currentPhoto.fileName}")
+                    // Handle videos immediately
+                    if (photoToLoad.isVideo) {
+                        android.util.Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
                         preloadPrevious()
                         _loadingState.value = BufferLoadingState.Ready
-                        return@withLock Result.success(null)
+                        return Result.success(null)
                     }
 
-                    val bitmap = buffer[currentPhoto.path]
-
-                    if (bitmap != null) {
-                        // Photo already in buffer, pre-load previous
+                    // If in buffer, return it
+                    if (isInBuffer) {
+                        val bitmap = buffer[photoToLoad.path]
                         preloadPrevious()
                         _loadingState.value = BufferLoadingState.Ready
-                        return@withLock Result.success(bitmap)
-                    } else {
-                        // Photo not in buffer, load it synchronously
-                        _loadingState.value = BufferLoadingState.Loading
-                        when (val result = imageCache.load(currentPhoto.path)) {
-                            is Result.Success -> {
-                                addToBuffer(currentPhoto.path, result.data)
-                                preloadPrevious()
-                                _loadingState.value = BufferLoadingState.Ready
-                                return@withLock Result.success(result.data)
-                            }
-                            is Result.Error -> {
-                                // Log error but try previous photo silently
-                                android.util.Log.w(TAG, "Failed to load ${currentPhoto.fileName}, trying previous photo: ${result.message}")
-                                retriesSoFar++
-                                // Continue loop to try previous photo
-                            }
-                            is Result.Loading -> {
-                                // Unexpected state, try previous photo
-                                android.util.Log.w(TAG, "Unexpected loading state for ${currentPhoto.fileName}, trying previous")
-                                retriesSoFar++
-                                // Continue loop to try previous photo
-                            }
-                        }
+                        return Result.success(bitmap)
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Exception getting previous photo: ${e.message}, trying previous")
-                    retriesSoFar++
-                    // Continue loop to try previous photo
+
+                    // Mark as loading before releasing mutex
+                    _loadingState.value = BufferLoadingState.Loading
                 }
-            }
 
-            // All retries failed
-            _loadingState.value = BufferLoadingState.Error(IllegalStateException("Failed to load photo after $maxRetries attempts"))
-            return@withLock Result.error(
-                IllegalStateException("Failed to load photo after $maxRetries attempts"),
-                "All recent photos failed to load"
-            )
+                // STEP 2: Load photo WITHOUT holding mutex (with timeout)
+                val loadResult = try {
+                    withTimeout(PHOTO_LOAD_TIMEOUT_MS) {
+                        imageCache.load(photoToLoad.path)
+                    }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${PHOTO_LOAD_TIMEOUT_MS}ms, trying previous")
+                    retriesSoFar++
+                    continue
+                }
+
+                // STEP 3: Reacquire mutex, update buffer, release mutex
+                when (loadResult) {
+                    is Result.Success -> {
+                        mutex.withLock {
+                            addToBuffer(photoToLoad.path, loadResult.data)
+                            preloadPrevious()
+                            _loadingState.value = BufferLoadingState.Ready
+                        }
+                        return Result.success(loadResult.data)
+                    }
+                    is Result.Error -> {
+                        android.util.Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying previous photo: ${loadResult.message}")
+                        retriesSoFar++
+                    }
+                    is Result.Loading -> {
+                        android.util.Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying previous")
+                        retriesSoFar++
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Exception getting previous photo: ${e.message}, trying previous")
+                retriesSoFar++
+            }
         }
+
+        // All retries failed
+        mutex.withLock {
+            _loadingState.value = BufferLoadingState.Error(IllegalStateException("Failed to load photo after $maxRetries attempts"))
+        }
+        return Result.error(
+            IllegalStateException("Failed to load photo after $maxRetries attempts"),
+            "All recent photos failed to load"
+        )
     }
 
     /**
@@ -558,12 +591,54 @@ class PhotoBufferManager @Inject constructor(
         }
     }
 
+    /**
+     * Reduces buffer to minimum size (keeps only current photo).
+     * Used during memory pressure for graceful degradation.
+     *
+     * Thread Safety: Safe to call concurrently.
+     */
+    suspend fun reduceToMinimum() {
+        mutex.withLock {
+            if (photos.isEmpty() || currentIndex == -1) return@withLock
+
+            // Cancel all pre-load jobs
+            preloadJobs.values.forEach { it.cancel() }
+            preloadJobs.clear()
+
+            // Get current photo path before clearing buffer
+            val currentPhotoPath = photos.getOrNull(currentIndex)?.path
+
+            // Recycle all bitmaps except current photo
+            buffer.entries.forEach { (path, bitmap) ->
+                if (path != currentPhotoPath) {
+                    bitmap.recycle()
+                }
+            }
+
+            // Keep only current photo in buffer
+            val currentBitmap = currentPhotoPath?.let { buffer[it] }
+            buffer.clear()
+            if (currentBitmap != null && currentPhotoPath != null) {
+                buffer[currentPhotoPath] = currentBitmap
+            }
+
+            android.util.Log.d(TAG, "Reduced buffer to minimum (1 photo) due to memory pressure")
+        }
+    }
+
     companion object {
         /**
          * Buffer size: 5 photos for smooth playback.
          * Layout: [Current - 1, Current, Current + 1, Current + 2, Current + 3]
          */
         const val BUFFER_SIZE = 5
+
+        /**
+         * Photo load timeout: 15 seconds per photo.
+         * Prevents indefinite hangs on slow/unreachable SMB servers.
+         */
+        private const val PHOTO_LOAD_TIMEOUT_MS = 15_000L
+
         private const val TAG = "PhotoBufferManager"
     }
 }

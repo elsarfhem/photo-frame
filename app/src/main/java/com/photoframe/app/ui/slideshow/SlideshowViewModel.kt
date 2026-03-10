@@ -9,6 +9,8 @@ import com.photoframe.core.model.Photo
 import com.photoframe.core.model.SlideshowSettings
 import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
+import com.photoframe.core.reliability.MemoryMonitor
+import com.photoframe.core.reliability.MemoryState
 import com.photoframe.core.reliability.SlideshowWatchdog
 import com.photoframe.core.repository.SettingsRepository
 import com.photoframe.core.telemetry.TelemetryLogger
@@ -55,6 +57,7 @@ import javax.inject.Inject
  * @param settingsRepository Repository for slideshow settings
  * @param photoBufferManager Buffer manager for monitoring buffer state
  * @param networkMonitor Network connectivity monitor
+ * @param memoryMonitor Memory monitor for buffer recovery after memory pressure
  * @param crashHandler Crash handler for state preservation
  * @param telemetryLogger Telemetry logger for Crashlytics integration
  */
@@ -65,6 +68,7 @@ class SlideshowViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val photoBufferManager: PhotoBufferManager,
     private val networkMonitor: NetworkMonitor,
+    private val memoryMonitor: MemoryMonitor,
     private val crashHandler: CrashHandler,
     private val telemetryLogger: TelemetryLogger
 ) : ViewModel() {
@@ -80,6 +84,9 @@ class SlideshowViewModel @Inject constructor(
     private var networkRecoveryJob: Job? = null
     private var isNetworkDisconnected = false
 
+    // Memory recovery tracking
+    private var wasMemoryCritical = false
+
     // State persistence for crash recovery
     private var lastSavedPhotoIndex = -1
 
@@ -93,6 +100,14 @@ class SlideshowViewModel @Inject constructor(
                 handleNetworkStateChange(isAvailable)
             }
         }
+
+        // Monitor memory state for buffer recovery after memory pressure
+        viewModelScope.launch {
+            memoryMonitor.memoryState.collect { memoryState ->
+                handleMemoryStateChange(memoryState)
+            }
+        }
+
         // Observe repositories and update UI state
         // All state flows from repository are observed reactively - no suspend calls needed
         viewModelScope.launch {
@@ -275,6 +290,37 @@ class SlideshowViewModel @Inject constructor(
                 if (isNetworkDisconnected && networkMonitor.isNetworkAvailable.value) {
                     // Network came back, handleNetworkStateChange will be called
                     break
+                }
+            }
+        }
+    }
+
+    /**
+     * Handles memory state changes for buffer recovery.
+     *
+     * Strategy:
+     * - When Critical: Memory pressure detected, buffer reduced to minimum
+     * - When returning to Normal: Restore buffer by preloading next photos
+     */
+    private fun handleMemoryStateChange(memoryState: MemoryState) {
+        when (memoryState) {
+            is MemoryState.Critical -> {
+                // Memory pressure detected - buffer has been reduced to minimum
+                wasMemoryCritical = true
+                android.util.Log.w("SlideshowViewModel", "Critical memory pressure: ${memoryState.usagePercent}%")
+            }
+            is MemoryState.Warning -> {
+                // Warning threshold - memory cache cleared but buffer intact
+                android.util.Log.d("SlideshowViewModel", "Memory warning: ${memoryState.usagePercent}%")
+            }
+            is MemoryState.Normal -> {
+                // Memory returned to normal
+                if (wasMemoryCritical && isInitialized && _state.value.totalPhotos > 0) {
+                    // Recovered from critical memory - buffer needs restoration
+                    wasMemoryCritical = false
+                    android.util.Log.i("SlideshowViewModel", "Memory recovered from critical, restoring buffer preloading")
+                    // Buffer will automatically refill as we navigate through photos
+                    // No explicit action needed - the next photo load will trigger preload
                 }
             }
         }

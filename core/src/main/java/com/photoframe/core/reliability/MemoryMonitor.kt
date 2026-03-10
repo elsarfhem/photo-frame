@@ -148,7 +148,7 @@ class MemoryMonitor @Inject constructor(
      * Handles critical threshold (90%): Emergency cache clearing + GC.
      *
      * Actions:
-     * - Clear PhotoBufferManager (recycles bitmaps)
+     * - Reduce PhotoBufferManager to minimum (graceful degradation)
      * - Clear ImageCache memory and disk caches
      * - Explicit System.gc() request
      * - Log critical memory event
@@ -162,8 +162,9 @@ class MemoryMonitor @Inject constructor(
         // Log critical memory event
         telemetryLogger.logMemoryCritical(usagePercent)
 
-        // Emergency cache clearing
-        photoBufferManager.clear() // Recycles bitmaps
+        // Emergency cache clearing - graceful degradation
+        // Reduce buffer to minimum (keeps current photo) instead of clearing entirely
+        photoBufferManager.reduceToMinimum()
         imageCache.clearAllCaches() // Clears memory + disk
 
         // Request garbage collection (hint only, JVM decides)
