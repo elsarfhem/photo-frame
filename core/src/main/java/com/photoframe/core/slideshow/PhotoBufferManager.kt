@@ -438,43 +438,40 @@ class PhotoBufferManager @Inject constructor(
 
     /**
      * Pre-loads the initial buffer on initialization.
-     * Loads Current, Current + 1, and Current + 2.
+     * Loads Current photo SYNCHRONOUSLY, then loads Current + 1 and Current + 2 in background.
      * Skips videos (no bitmap to preload).
      *
      * Note: Must be called within mutex lock.
      */
-    private fun preloadInitialBuffer() {
+    private suspend fun preloadInitialBuffer() {
         if (photos.isEmpty()) return
 
-        // Pre-load current photo first (synchronous, blocking)
         val currentPhoto = photos[currentIndex]
-        val job = CoroutineScope(ioDispatcher).launch {
-            // Skip videos for current photo
-            if (currentPhoto.isVideo) {
-                android.util.Log.d(TAG, "preloadInitialBuffer: Current item is video, skipping bitmap load: ${currentPhoto.fileName}")
-                mutex.withLock {
+
+        // Load current photo SYNCHRONOUSLY to ensure it's available before initialize() returns
+        if (currentPhoto.isVideo) {
+            android.util.Log.d(TAG, "preloadInitialBuffer: Current item is video, skipping bitmap load: ${currentPhoto.fileName}")
+            _loadingState.value = BufferLoadingState.Ready
+        } else {
+            // Load current photo synchronously (blocking) - CRITICAL FIX for black screen
+            when (val result = imageCache.load(currentPhoto.path)) {
+                is Result.Success -> {
+                    addToBuffer(currentPhoto.path, result.data)
                     _loadingState.value = BufferLoadingState.Ready
+                    android.util.Log.d(TAG, "preloadInitialBuffer: Current photo loaded synchronously: ${currentPhoto.fileName}")
                 }
-            } else {
-                when (val result = imageCache.load(currentPhoto.path)) {
-                    is Result.Success -> {
-                        mutex.withLock {
-                            addToBuffer(currentPhoto.path, result.data)
-                            _loadingState.value = BufferLoadingState.Ready
-                        }
-                    }
-                    is Result.Error -> {
-                        mutex.withLock {
-                            _loadingState.value = BufferLoadingState.Error(result.exception)
-                        }
-                    }
-                    is Result.Loading -> {
-                        // Should not happen
-                    }
+                is Result.Error -> {
+                    _loadingState.value = BufferLoadingState.Error(result.exception)
+                    android.util.Log.e(TAG, "preloadInitialBuffer: Failed to load current photo: ${result.message}")
+                }
+                is Result.Loading -> {
+                    // Should not happen
                 }
             }
+        }
 
-            // Pre-load next 2 photos in background (skip videos)
+        // Pre-load next 2 photos in background (async, non-blocking)
+        val job = CoroutineScope(ioDispatcher).launch {
             for (i in 1..2) {
                 val nextIndex = (currentIndex + i) % photos.size
                 val photo = photos[nextIndex]
@@ -493,7 +490,7 @@ class PhotoBufferManager @Inject constructor(
                             }
                         }
                         is Result.Error -> {
-                            // Log error but continue
+                            android.util.Log.w(TAG, "preloadInitialBuffer: Failed to preload ${photo.fileName}: ${result.message}")
                         }
                         is Result.Loading -> {
                             // Should not happen

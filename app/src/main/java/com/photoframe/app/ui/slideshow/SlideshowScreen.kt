@@ -152,6 +152,10 @@ fun SlideshowScreen(
                     modifier = Modifier.align(Alignment.TopEnd)
                 )
             }
+            // Defensive fallback for unexpected state gaps
+            else -> {
+                LoadingContent()
+            }
         }
     }
 }

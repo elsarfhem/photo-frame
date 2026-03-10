@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -118,14 +119,14 @@ class SlideshowViewModel @Inject constructor(
                     error
                 }
 
-                _state.value = _state.value.copy(
+                _state.update { it.copy(
                     currentPhoto = currentPhoto,
                     currentPhotoMetadata = metadata,
                     photoIndex = photoIndex.coerceAtLeast(0),
                     totalPhotos = photos.size,
                     isLoading = isLoading,
                     error = filteredError
-                )
+                ) }
             }.collect { }
         }
 
@@ -134,11 +135,11 @@ class SlideshowViewModel @Inject constructor(
             val settingsResult = settingsRepository.loadSlideshowSettings()
             if (settingsResult is Result.Success) {
                 val settings = settingsResult.data
-                _state.value = _state.value.copy(
+                _state.update { it.copy(
                     transitionType = settings.transitionType,
                     displayIntervalMillis = settings.displayIntervalMillis,
                     panAnimationEnabled = settings.panAnimationEnabled
-                )
+                ) }
 
                 // Initialize slideshow with settings-based shuffle and auto-play
                 // This eliminates the timing gap where LaunchedEffect would be used
@@ -161,11 +162,11 @@ class SlideshowViewModel @Inject constructor(
                 android.util.Log.d("SlideshowViewModel", "Settings changed, applying dynamically")
 
                 // Update UI state with new settings
-                _state.value = _state.value.copy(
+                _state.update { it.copy(
                     transitionType = settings.transitionType,
                     displayIntervalMillis = settings.displayIntervalMillis,
                     panAnimationEnabled = settings.panAnimationEnabled
-                )
+                ) }
 
                 // Only apply changes if slideshow is initialized and has photos
                 if (!isInitialized || _state.value.totalPhotos == 0) {
@@ -194,9 +195,9 @@ class SlideshowViewModel @Inject constructor(
         viewModelScope.launch {
             photoBufferManager.loadingState.collect { loadingState ->
                 val bufferSize = photoBufferManager.getBufferSize()
-                _state.value = _state.value.copy(
+                _state.update { it.copy(
                     bufferedPhotosCount = bufferSize
-                )
+                ) }
 
                 // Update telemetry context
                 val currentIndex = slideshowRepository.getCurrentPhotoIndex()
@@ -236,9 +237,9 @@ class SlideshowViewModel @Inject constructor(
                 telemetryLogger.logNetworkDisconnect()
 
                 // Show warning in UI
-                _state.value = _state.value.copy(
+                _state.update { it.copy(
                     error = "Network disconnected. Playing buffered photos..."
-                )
+                ) }
 
                 // Start retry job (every 30 seconds)
                 startNetworkRetryJob()
@@ -255,7 +256,7 @@ class SlideshowViewModel @Inject constructor(
                 networkRecoveryJob = null
 
                 // Clear error
-                _state.value = _state.value.copy(error = null)
+                _state.update { it.copy(error = null) }
 
                 // Resume slideshow (buffer will automatically reload)
             }
@@ -289,18 +290,18 @@ class SlideshowViewModel @Inject constructor(
      */
     fun initialize(shuffleEnabled: Boolean = false, autoPlay: Boolean = false) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, error = null)
+            _state.update { it.copy(isLoading = true, error = null) }
 
             val result = slideshowRepository.loadPhotos(shuffleEnabled)
             when (result) {
                 is Result.Success -> {
                     // Update metadata
                     val metadata = slideshowRepository.getCurrentPhotoMetadata()
-                    _state.value = _state.value.copy(
+                    _state.update { it.copy(
                         currentPhotoMetadata = metadata,
                         isLoading = false,
                         error = null
-                    )
+                    ) }
 
                     // Start auto-play if requested and loading succeeded
                     if (autoPlay) {
@@ -308,10 +309,10 @@ class SlideshowViewModel @Inject constructor(
                     }
                 }
                 is Result.Error -> {
-                    _state.value = _state.value.copy(
+                    _state.update { it.copy(
                         isLoading = false,
                         error = result.message ?: "Failed to load photos"
-                    )
+                    ) }
                 }
                 is Result.Loading -> {
                     // Should not happen
@@ -331,7 +332,7 @@ class SlideshowViewModel @Inject constructor(
     fun play() {
         if (_state.value.isPlaying) return // Already playing
 
-        _state.value = _state.value.copy(isPlaying = true)
+        _state.update { it.copy(isPlaying = true) }
 
         autoAdvanceJob?.cancel()
         autoAdvanceJob = viewModelScope.launch {
@@ -368,7 +369,7 @@ class SlideshowViewModel @Inject constructor(
      * Thread Safety: Safe to call from main thread.
      */
     fun pause() {
-        _state.value = _state.value.copy(isPlaying = false)
+        _state.update { it.copy(isPlaying = false) }
         autoAdvanceJob?.cancel()
         autoAdvanceJob = null
 
@@ -398,7 +399,7 @@ class SlideshowViewModel @Inject constructor(
         }
 
         // Set navigation direction for transition animation
-        _state.value = _state.value.copy(navigationDirection = NavigationDirection.FORWARD)
+        _state.update { it.copy(navigationDirection = NavigationDirection.FORWARD) }
 
         viewModelScope.launch {
             val result = slideshowRepository.nextPhoto()
@@ -431,7 +432,7 @@ class SlideshowViewModel @Inject constructor(
 
                     // Only show error in UI if it's a critical failure (10+ consecutive failures)
                     if (errorMsg.contains("All recent photos failed")) {
-                        _state.value = _state.value.copy(error = "Unable to load photos. Check network connection.")
+                        _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
                     }
                 }
                 is Result.Loading -> {
@@ -461,7 +462,7 @@ class SlideshowViewModel @Inject constructor(
         }
 
         // Set navigation direction for transition animation
-        _state.value = _state.value.copy(navigationDirection = NavigationDirection.BACKWARD)
+        _state.update { it.copy(navigationDirection = NavigationDirection.BACKWARD) }
 
         viewModelScope.launch {
             val result = slideshowRepository.previousPhoto()
@@ -476,9 +477,9 @@ class SlideshowViewModel @Inject constructor(
                 }
                 is Result.Error -> {
                     // Still need to handle error explicitly as it's not always from StateFlow
-                    _state.value = _state.value.copy(
+                    _state.update { it.copy(
                         error = result.message ?: "Failed to load previous photo"
-                    )
+                    ) }
                 }
                 is Result.Loading -> {
                     // Should not happen
@@ -499,15 +500,15 @@ class SlideshowViewModel @Inject constructor(
             when (result) {
                 is Result.Success -> {
                     val metadata = slideshowRepository.getCurrentPhotoMetadata()
-                    _state.value = _state.value.copy(
+                    _state.update { it.copy(
                         currentPhotoMetadata = metadata,
                         error = null
-                    )
+                    ) }
                 }
                 is Result.Error -> {
-                    _state.value = _state.value.copy(
+                    _state.update { it.copy(
                         error = result.message ?: "Failed to shuffle photos"
-                    )
+                    ) }
                 }
                 is Result.Loading -> {
                     // Should not happen

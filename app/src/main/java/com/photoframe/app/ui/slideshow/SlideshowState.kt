@@ -1,7 +1,6 @@
 package com.photoframe.app.ui.slideshow
 
 import android.graphics.Bitmap
-import androidx.compose.runtime.Immutable
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.TransitionType
 
@@ -17,7 +16,8 @@ enum class NavigationDirection {
 /**
  * UI state for the slideshow screen.
  *
- * Thread Safety: Immutable data class, safe to share across threads.
+ * Thread Safety: Data class with mutable Bitmap field. Use StateFlow.update{} for atomic updates.
+ * Note: @Immutable removed because Bitmap is mutable - Compose needs to detect changes.
  *
  * @property currentPhoto Current photo bitmap being displayed
  * @property currentPhotoMetadata Metadata for the current photo
@@ -29,7 +29,6 @@ enum class NavigationDirection {
  * @property bufferedPhotosCount Number of photos currently in buffer (for debugging)
  * @property transitionType Type of transition effect between media
  */
-@Immutable
 data class SlideshowState(
     val currentPhoto: Bitmap? = null,
     val currentPhotoMetadata: Photo? = null,
