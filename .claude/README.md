@@ -10,15 +10,15 @@ This system enables **unsupervised, multi-phase feature development** from requi
 
 **⚡ Simplified Workflow** (XS/S stories):
 - For small changes, bug fixes, minor enhancements
-- 4 phases: Refinement → Lightweight PRD → Implementation → Testing
-- **Duration: 35-85 minutes**
-- No architecture debate, assumes best practices
+- 6 phases: Refinement → Lightweight PRD → Implementation → Testing → Code Review → Human Validation
+- **Duration: 55-125 minutes**
+- Lightweight code review (2 reviewers + developer)
 
 **📋 Full Workflow** (M/L/XL stories):
 - For features requiring architecture and comprehensive review
-- 10 phases: Full requirements → Architecture debate → NFR review → Test planning → Implementation → Testing
-- **Duration: 8-12 hours**
-- Collaborative debate between agent teams
+- 11 phases: Full requirements → Architecture debate → NFR review → Test planning → Implementation → Testing → Code Review → Final Report
+- **Duration: 8.5-13 hours**
+- Comprehensive code review (3 reviewers + developer)
 
 **Automatic routing** based on story T-shirt size (XS/S/M/L/XL).
 
@@ -34,13 +34,16 @@ This system enables **unsupervised, multi-phase feature development** from requi
 7. **Produces final PRD** (Ralph format)
 8. **Implements the code** (Developer agent)
 9. **Writes and executes tests** (3 QA implementation agents debate → reach consensus)
+10. **Reviews and fixes code** (3 Reviewers + Developer debate → reach consensus)
+11. **Generates final report** (Summary and Jira update)
 
 **Simplified Workflow** (when story size is XS/S):
 1. **Asks clarifying questions** (Coordinator - Interactive Q&A)
 2. **Creates lightweight PRD** (Product Owner agent - brief)
 3. **Implements the code** (Developer agent - follows existing patterns)
 4. **Writes and executes tests** (Single QA agent - focused tests)
-5. **Human validation** (Quick spot-check - 5-15 minutes)
+5. **Reviews and fixes code** (2 Reviewers + Developer debate → reach consensus)
+6. **Human validation** (Quick spot-check - 5-15 minutes)
 
 All **automatically**, with **collaborative scientific debate** (in full workflow) and minimal user interaction.
 
@@ -233,6 +236,28 @@ docs/features/<your-feature-slug>/
 - **`NFR_CHECKLIST_FRONTEND.md`**: Comprehensive NFR checklist for frontend web apps
 - **`README.md`**: This file
 
+### Agents
+
+The `agents/` directory contains specialized agent definitions for the workflow:
+
+**Workflow Agents** (used automatically by coordinator):
+- **`PRODUCT_OWNER.md`** - Requirements enrichment and PRD creation
+- **`ARCHITECT.md`** - Architecture proposals (3 architects debate)
+- **`SYNTHESIS.md`** - Architecture synthesis and ADR creation
+- **`SENIOR_DEV.md`** - NFR validation and technical review (3 senior devs debate)
+- **`QA.md`** - Test planning (3 QA engineers debate)
+- **`DEVELOPER.md`** - Code implementation
+- **`QA_IMPLEMENTATION.md`** - Test implementation (3 QA engineers debate)
+- **`REVIEWER.md`** - Code review and fixes (3 reviewers + developer debate)
+
+**Standalone Agents** (invoke directly anytime):
+- **`PR_WRITER.md`** - Generates comprehensive PR descriptions
+  - Analyzes current branch changes vs base branch
+  - Extracts content from FARO feature documentation (if exists)
+  - Creates structured PR description with summary, testing, NFR compliance, reviewer notes
+  - **Usage**: `@.claude/agents/PR_WRITER.md Generate a PR description for the current branch`
+  - Creates `PR_DESCRIPTION.md` ready to copy/paste to GitHub
+
 ### Templates
 
 The `templates/` directory contains reusable task templates:
@@ -241,13 +266,6 @@ The `templates/` directory contains reusable task templates:
    - Used to create structured feature requests
    - Supports Jira integration (auto-fetches story details)
    - Copy to `docs/feature-requests/<name>.md` and fill out
-
-2. **`PR_DESCRIPTION_GENERATOR.md`** - Automatic PR description generator
-   - Analyzes current branch changes vs base branch
-   - Reads feature documentation (if using FARO workflow)
-   - Generates comprehensive PR description with summary, testing, NFR compliance, and reviewer notes
-   - **Usage**: Simply say `"Generate a PR description for the current branch"`
-   - Creates `PR_DESCRIPTION.md` ready for GitHub PR
 
 ## Process Phases
 
@@ -353,6 +371,32 @@ The `templates/` directory contains reusable task templates:
 - Coverage reports
 - Verification of all acceptance criteria
 
+### Phase 10: Code Review & Fix (Collaborative Debate)
+**Agents**: 3 Code Reviewers + 1 Developer (collaborative debate using agent teams)
+- Reviewer 1: Code Quality & Maintainability
+- Reviewer 2: Security & Correctness
+- Reviewer 3: Performance & Concurrency
+- Developer: Defends implementation and implements fixes
+
+**Process**: Reviewers conduct independent code review, then debate findings with developer. Developer defends design choices and can challenge invalid concerns. Team reaches consensus (2/3 reviewers must agree) on blocking issues. Developer implements fixes, review repeats until approved.
+
+**Scientific Debate**:
+- Reviewers try to disprove each other's concerns
+- Developer defends implementation choices with evidence
+- Only issues with 2/3 reviewer consensus are blocking
+- Maximum 3 review iterations
+
+**Output**:
+- `review/code-review-code-quality.md` - Code quality assessment
+- `review/code-review-security.md` - Security assessment
+- `review/code-review-performance.md` - Performance assessment
+- `review/CODE_REVIEW_SUMMARY.md` - Final review summary with approved status
+
+**Simplified Workflow**: Uses 2 reviewers instead of 3 (faster consensus)
+
+### Phase 11: Final Report & Jira Update
+**Actions**: Generate final summary, update Jira story (optional), mark feature as complete.
+
 ## Key Features
 
 ### 1. File Reference (No Copy-Paste!)
@@ -381,6 +425,7 @@ Uses Claude Code's **agent teams** feature for collaborative scientific debate:
 - **3 architects** debate and challenge each other's proposals
 - **3 senior devs** debate NFR priorities and risk assessments
 - **3 QA engineers** debate test coverage and identify gaps
+- **3 code reviewers + developer** debate code quality, security, and fixes
 - **Scientific Process**: Agents try to disprove each other's theories, like peer review
 - **Consensus Required**: Teams proceed only when at least 2 out of 3 agree
 - Teammates communicate via SendMessage during work
@@ -398,6 +443,7 @@ Agents are assigned non-overlapping file scopes to prevent merge conflicts:
 - Senior devs focus on different NFR areas (3 assessment files)
 - QA agents handle different test types (3 test plan files)
 - QA implementation agents write tests for different scopes (3 test suite files)
+- Code reviewers write to separate review files (3 files) + developer fixes code
 
 ### 7. Platform-Specific NFR Integration
 Non-functional requirements are automatically validated using platform-specific checklists:
@@ -416,19 +462,20 @@ Includes developer and QA agents that write production-ready code:
 - Tests executed with coverage reports
 - Collaborative test code review between 3 QA implementation agents
 
-### 9. Automatic PR Description Generator
-Generate comprehensive pull request descriptions with a single command:
-- **Usage**: Just say `"Generate a PR description for the current branch"`
+### 9. PR Writer Agent
+Standalone agent for generating comprehensive pull request descriptions:
+- **Usage**: `@.claude/agents/PR_WRITER.md Generate a PR description for the current branch`
 - Analyzes git diff and commit history
-- Extracts content from feature documentation (PRD, architecture, test plans)
+- Extracts content from FARO feature documentation (if available)
 - Generates structured PR description with:
-  - Summary and changes
-  - Architecture decisions
+  - Summary and changes by module
+  - Architecture decisions (from ADR)
+  - Code review findings (from CODE_REVIEW_SUMMARY)
   - Testing coverage and NFR compliance
   - Breaking changes and migration guide
   - Reviewer notes and focus areas
-- Creates `PR_DESCRIPTION.md` ready to copy to GitHub PR
-- Optional: Can create PR directly with `gh pr create`
+- Creates `PR_DESCRIPTION.md` ready to copy/paste to GitHub PR
+- Can be invoked anytime after implementation is complete
 
 ## Customization
 

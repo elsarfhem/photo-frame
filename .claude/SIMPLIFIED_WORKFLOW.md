@@ -210,7 +210,58 @@ Create:
 
 ---
 
-### Phase 10: Human Validation (Quick Spot-Check)
+### Phase 10: Code Review & Fix (Simplified)
+
+**Collaborative review** - 2 reviewers + developer debate and fix issues.
+
+**Team**: 2 Code Reviewers + 1 Developer
+
+**Differences from Full Workflow**:
+- ❌ Skip: Third reviewer (2 instead of 3 for faster consensus)
+- ✅ Keep: Scientific debate method, consensus requirement, iterative fixes
+
+**Reviewer Focus Areas**:
+1. **Reviewer 1**: Code Quality & Correctness (combines quality + correctness)
+2. **Reviewer 2**: Security & Performance (combines security + performance)
+
+**Process**:
+1. Both reviewers conduct independent code review
+2. Share findings via SendMessage
+3. Developer defends implementation and explains choices
+4. Team debates: challenge invalid concerns, defend legitimate issues
+5. Reach consensus (both reviewers must agree on blocking issues)
+6. Developer implements agreed-upon fixes
+7. Re-review fixes
+8. Repeat until approved (max 2 iterations for small stories)
+
+**What Reviewers Check**:
+- Code reuse: Is existing code leveraged?
+- Correctness: Does it meet acceptance criteria?
+- Edge cases: Are corner cases handled?
+- Security: Any vulnerabilities?
+- Performance: Any obvious bottlenecks?
+- Thread safety: Proper synchronization if concurrent?
+- Tests: Are tests adequate?
+
+**Output**:
+- `review/code-review-quality-correctness.md`
+- `review/code-review-security-performance.md`
+- `review/CODE_REVIEW_SUMMARY.md`
+
+**Duration**: 10-20 minutes (AI review + fixes)
+
+**Validation**:
+- [ ] Both reviewers completed review
+- [ ] Consensus reached on all issues
+- [ ] Developer fixed all agreed-upon issues
+- [ ] Both reviewers approved
+- [ ] CODE_REVIEW_SUMMARY.md written
+
+**On Success**: Proceed to Phase 11 (Human Validation)
+
+---
+
+### Phase 11: Human Validation (Quick Spot-Check)
 
 **Human reviews** - Quick validation before merge.
 
@@ -253,11 +304,13 @@ Phase 8: Implementation (10-30 min, AI)
     ↓
 Phase 9: Testing (10-20 min, AI)
     ↓
-Phase 10: Human Validation (5-15 min, human)
+Phase 10: Code Review & Fix (10-20 min, AI - 2 reviewers + developer)
+    ↓
+Phase 11: Human Validation (5-15 min, human)
     ↓
 ✅ DONE - Ready to merge!
 
-Total Time: 35-85 minutes (vs 8-12 hours for full workflow)
+Total Time: 55-125 minutes (vs 8-12 hours for full workflow)
 ```
 
 ## Comparison: Simplified vs Full Workflow

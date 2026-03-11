@@ -29,6 +29,10 @@ Phase 8: Implementation → Developer Agent
    ↓ [Validate implementation complete]
 Phase 9: Test Implementation & Execution → 3 QA Agents (collaborative debate → consensus)
    ↓ [Validate tests complete + consensus on quality]
+Phase 10: Code Review & Fix → 3 Reviewer Agents + Developer (collaborative debate → consensus)
+   ↓ [Validate code reviewed + all issues fixed + consensus reached]
+Phase 11: Final Report & Jira Update
+   ↓ [Complete]
 ```
 
 ## Operating Principles
@@ -411,7 +415,8 @@ Question 4: "Are there any performance requirements?"
 2. **Skip to Phase 8**: Proceed directly to Implementation (see Phase 8 below)
 3. **Modified Phase 8**: Developer agent uses LIGHTWEIGHT_PRD.md instead of full architecture
 4. **Continue to Phase 9**: Testing (simplified, single QA agent)
-5. **Human Validation**: Quick spot-check (5-15 minutes)
+5. **Continue to Phase 10**: Code Review & Fix (simplified, 2 reviewers + developer)
+6. **Continue to Phase 11**: Human Validation (quick spot-check, 5-15 minutes)
 
 **Agent Instructions for Simplified Phase 8**:
 ```
@@ -449,6 +454,37 @@ Test Scope:
 - Brief TEST_RESULTS.md (1-2 pages)
 
 No comprehensive test planning phase - generate appropriate tests directly.
+```
+
+**Agent Instructions for Simplified Phase 10**:
+```
+You are conducting CODE REVIEW for a SMALL story (XS or S size) using the simplified workflow.
+
+Team: 2 Reviewers + 1 Developer (faster consensus than 3 reviewers)
+
+Reviewers:
+1. Reviewer 1 (Code Quality & Correctness): Focus on code reuse, correctness, edge cases
+2. Reviewer 2 (Security & Performance): Focus on security issues, performance, thread safety
+
+Input:
+- implementation/ (code to review)
+- requirements/LIGHTWEIGHT_PRD.md (acceptance criteria)
+
+Process:
+1. Conduct independent review from your focus area
+2. Share findings with team via SendMessage
+3. Developer defends implementation choices
+4. Debate: challenge invalid concerns, defend legitimate issues
+5. Reach consensus (both reviewers must agree on blocking issues)
+6. Developer implements fixes
+7. Re-review (max 2 iterations for small stories)
+
+Output:
+- review/code-review-quality-correctness.md
+- review/code-review-security-performance.md
+- review/CODE_REVIEW_SUMMARY.md
+
+Focus on HIGH-IMPACT issues only for small stories - don't nitpick.
 ```
 
 See `.claude/SIMPLIFIED_WORKFLOW.md` for complete simplified workflow documentation.
@@ -898,11 +934,127 @@ See `.claude/SIMPLIFIED_WORKFLOW.md` for complete simplified workflow documentat
 - [ ] Consensus documented on test quality
 - [ ] Agent team cleaned up successfully
 
-**On Success**: Proceed to Phase 10 (Final Report).
+**On Success**: Proceed to Phase 10 (Code Review & Fix).
 
 ---
 
-### Phase 10: Final Report & Jira Update
+### Phase 10: Code Review & Fix (Collaborative Debate)
+
+**Goal**: Conduct thorough code review through collaborative scientific debate between reviewers and developer to identify and fix issues before production.
+
+**Why This Phase**:
+- Catch bugs, security issues, and code quality problems before merge
+- Ensure code follows best practices and architecture
+- Validate thread safety and performance
+- Developer can defend design choices and learn from feedback
+- Scientific debate ensures only legitimate issues get fixed
+
+**Actions**:
+1. Create an agent team for collaborative code review
+2. Spawn 3 reviewer teammates + retrieve the original developer (odd number rule: 4 total, but 3 reviewers vote):
+
+   ```
+   Create an agent team to conduct code review through collaborative debate.
+
+   **IMPORTANT TEAM COLLABORATION INSTRUCTIONS**:
+   - You are 3 code reviewers + 1 developer working together
+   - Each reviewer has a different focus area (code quality, security, performance)
+   - After initial review, DEBATE the findings with teammates
+   - Developer DEFENDS their implementation and explains design choices
+   - CHALLENGE review comments that seem invalid
+   - Try to DISPROVE concerns before accepting them (scientific method)
+   - Distinguish between BLOCKING ISSUES (must fix) vs SUGGESTIONS (nice to have)
+   - Proceed only when CONSENSUS emerges (at least 2 out of 3 reviewers agree on each issue)
+   - Developer implements agreed-upon fixes, then review repeats until approval
+
+   Spawn 3 reviewer teammates:
+
+   1. Reviewer 1 (Code Quality & Maintainability): "You are a code reviewer agent
+      focused on code quality and maintainability. Read .claude/agents/REVIEWER.md
+      for your complete instructions. Your focus area is 'Code Quality & Maintainability'.
+      Feature Directory: docs/features/<feature-slug>/.
+
+      COLLABORATIVE PROCESS:
+      1. Read implementation and conduct your review from code quality perspective
+      2. Document findings (blocking issues vs suggestions)
+      3. Share findings with teammates using SendMessage
+      4. Review teammates' findings and debate validity
+      5. Challenge invalid concerns, defend valid ones
+      6. Listen to developer's defense of implementation choices
+      7. Reach consensus with team (2/3 reviewers must agree on each issue)
+      8. Verify developer's fixes
+      9. Repeat until all blocking issues resolved and 2/3 reviewers approve"
+
+   2. Reviewer 2 (Security & Correctness): "You are a code reviewer agent focused
+      on security and correctness. Read .claude/agents/REVIEWER.md for your complete
+      instructions. Your focus area is 'Security & Correctness'. Feature Directory:
+      docs/features/<feature-slug>/.
+
+      COLLABORATIVE PROCESS:
+      1. Read implementation and conduct your review from security perspective
+      2. Document findings (blocking issues vs suggestions)
+      3. Share findings with teammates using SendMessage
+      4. Review teammates' findings and debate validity
+      5. Challenge invalid concerns, defend valid ones
+      6. Listen to developer's defense of implementation choices
+      7. Reach consensus with team (2/3 reviewers must agree on each issue)
+      8. Verify developer's fixes
+      9. Repeat until all blocking issues resolved and 2/3 reviewers approve"
+
+   3. Reviewer 3 (Performance & Concurrency): "You are a code reviewer agent focused
+      on performance and concurrency. Read .claude/agents/REVIEWER.md for your complete
+      instructions. Your focus area is 'Performance & Concurrency'. Feature Directory:
+      docs/features/<feature-slug>/.
+
+      COLLABORATIVE PROCESS:
+      1. Read implementation and conduct your review from performance perspective
+      2. Document findings (blocking issues vs suggestions)
+      3. Share findings with teammates using SendMessage
+      4. Review teammates' findings and debate validity
+      5. Challenge invalid concerns, defend valid ones
+      6. Listen to developer's defense of implementation choices
+      7. Reach consensus with team (2/3 reviewers must agree on each issue)
+      8. Verify developer's fixes
+      9. Repeat until all blocking issues resolved and 2/3 reviewers approve"
+
+   **IMPORTANT**: The developer from Phase 8 should also be added to the team to defend
+   their implementation and make fixes. Use SendMessage to include the developer in
+   debates. Developer can:
+   - Explain design choices and rationale
+   - Challenge review comments that are invalid
+   - Ask clarifying questions
+   - Implement agreed-upon fixes
+   - Push back on suggestions that violate architecture
+
+   Wait for reviewers to reach consensus (2/3 approve) and developer to fix all agreed-upon
+   issues, then ask the team to shut down.
+   ```
+
+3. Monitor team's debate and progress
+4. Track review iterations (maximum 3 iterations)
+5. After consensus and approval (2/3 reviewers), clean up the agent team
+
+**Validation**:
+- [ ] `docs/features/<feature-slug>/review/code-review-code-quality.md` exists
+- [ ] `docs/features/<feature-slug>/review/code-review-security.md` exists
+- [ ] `docs/features/<feature-slug>/review/code-review-performance.md` exists
+- [ ] `docs/features/<feature-slug>/review/CODE_REVIEW_SUMMARY.md` exists
+- [ ] All blocking issues identified and resolved
+- [ ] Consensus reached (at least 2/3 reviewers approved)
+- [ ] Developer implemented all agreed-upon fixes
+- [ ] Review iterations documented (should be ≤3)
+- [ ] Agent team cleaned up successfully
+
+**On Success**: Proceed to Phase 11 (Final Report).
+
+**On Failure** (no consensus after 3 iterations):
+- Document the disagreement
+- Escalate to user for decision
+- Do not proceed until resolved
+
+---
+
+### Phase 11: Final Report & Jira Update
 
 **Actions**:
 1. Update `docs/features/<feature-slug>/PROGRESS.md` with "COMPLETE" status
@@ -997,7 +1149,8 @@ Maintain `docs/features/<feature-slug>/PROGRESS.md` with:
 - [ ] Phase 7: Final PRD Generation
 - [ ] Phase 8: Implementation
 - [ ] Phase 9: Test Implementation & Execution
-- [ ] Phase 10: Final Report
+- [ ] Phase 10: Code Review & Fix
+- [ ] Phase 11: Final Report
 
 ## Current Phase: [phase name]
 
