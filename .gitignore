@@ -72,6 +72,7 @@ vcs.xml
 # Keystore files
 *.jks
 *.keystore
+keystore.properties
 
 # OS-specific files
 .DS_Store
