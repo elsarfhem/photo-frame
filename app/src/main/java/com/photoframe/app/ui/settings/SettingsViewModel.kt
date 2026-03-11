@@ -6,6 +6,7 @@ import com.photoframe.core.model.Result
 import com.photoframe.core.model.SlideshowSettings
 import com.photoframe.core.model.SmbConnection
 import com.photoframe.core.repository.SettingsRepository
+import com.photoframe.core.scheduling.ScheduleManager
 import com.photoframe.core.smb.SmbClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +34,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val smbClient: SmbClient
+    private val smbClient: SmbClient,
+    private val scheduleManager: ScheduleManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState.EMPTY)
@@ -291,6 +293,17 @@ class SettingsViewModel @Inject constructor(
             )
 
             val settingsResult = settingsRepository.saveSlideshowSettings(slideshowSettings)
+
+            // Wire up schedule manager based on settings
+            if (settingsResult is Result.Success) {
+                if (slideshowSettings.scheduleEnabled) {
+                    val scheduled = scheduleManager.scheduleDaily(slideshowSettings)
+                    android.util.Log.i("SettingsViewModel", "Schedule activated: $scheduled")
+                } else {
+                    scheduleManager.cancelSchedule()
+                    android.util.Log.i("SettingsViewModel", "Schedule cancelled")
+                }
+            }
 
             _state.value = _state.value.copy(
                 isSaving = false,

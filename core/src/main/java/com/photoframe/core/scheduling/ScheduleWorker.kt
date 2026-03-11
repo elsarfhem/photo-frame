@@ -3,6 +3,7 @@ package com.photoframe.core.scheduling
 import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
+import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.photoframe.core.repository.SettingsRepository
@@ -31,6 +32,7 @@ import dagger.assisted.AssistedInject
  * @param params Worker parameters from WorkManager
  * @param settingsRepository Repository for loading settings (injected by Hilt)
  */
+@HiltWorker
 class ScheduleWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
