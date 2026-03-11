@@ -15,6 +15,13 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// Get version from root project (managed by axion-release plugin)
+val appVersionName = rootProject.extra["appVersionName"] as String
+val appVersionCode = rootProject.extra["appVersionCode"] as Int
+
+// Print version info during build
+println("Building Easy Photo Frame v${appVersionName} (${appVersionCode})")
+
 android {
     namespace = "com.photoframe.app"
     compileSdk = 35
@@ -23,8 +30,8 @@ android {
         applicationId = "com.photoframe.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
