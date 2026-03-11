@@ -95,9 +95,10 @@ interface SlideshowRepository {
      *
      * Thread Safety: Safe to call concurrently.
      *
+     * @param displayIntervalMs Display interval in milliseconds for dynamic timeout calculation
      * @return Result.Success with next photo bitmap (or null for videos), Result.Error if failed
      */
-    suspend fun nextPhoto(): Result<Bitmap?>
+    suspend fun nextPhoto(displayIntervalMs: Long = 10_000L): Result<Bitmap?>
 
     /**
      * Goes back to the previous media item in the list (photo or video).
@@ -105,9 +106,10 @@ interface SlideshowRepository {
      *
      * Thread Safety: Safe to call concurrently.
      *
+     * @param displayIntervalMs Display interval in milliseconds for dynamic timeout calculation
      * @return Result.Success with previous photo bitmap (or null for videos), Result.Error if failed
      */
-    suspend fun previousPhoto(): Result<Bitmap?>
+    suspend fun previousPhoto(displayIntervalMs: Long = 10_000L): Result<Bitmap?>
 
     /**
      * Gets the current photo metadata.

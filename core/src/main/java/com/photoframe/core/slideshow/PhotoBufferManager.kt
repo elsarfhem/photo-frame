@@ -164,11 +164,18 @@ class PhotoBufferManager @Inject constructor(
      *
      * Thread Safety: Safe to call concurrently. Mutex is released during IO operations.
      *
+     * @param displayIntervalMs Display interval in milliseconds for dynamic timeout calculation
      * @return Result.Success with next photo bitmap (or null for videos), Result.Error if all photos failed
      */
-    suspend fun getNextPhoto(): Result<Bitmap?> {
-        // Reduce retries from 10 to 3 as we now have timeouts
-        val maxRetries = 3
+    suspend fun getNextPhoto(displayIntervalMs: Long = 10_000L): Result<Bitmap?> {
+        // FIX A: Timeout EQUALS display interval (user requirement: "equal to configured delay")
+        // Changed from 70% to 100% to meet requirement
+        val timeoutPerAttempt = displayIntervalMs.coerceAtLeast(2_000L)
+
+        // FIX A: Single retry only (worst case = timeout = interval)
+        // Changed from adaptive 1-3 retries to ensure total time ≤ interval
+        val maxRetries = 1
+
         var retriesSoFar = 0
 
         while (retriesSoFar < maxRetries) {
@@ -193,7 +200,7 @@ class PhotoBufferManager @Inject constructor(
                     // Handle videos immediately
                     if (photoToLoad.isVideo) {
                         android.util.Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
-                        preloadNext()
+                        preloadNext(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(null)
                     }
@@ -201,7 +208,7 @@ class PhotoBufferManager @Inject constructor(
                     // If in buffer, return it
                     if (isInBuffer) {
                         val bitmap = buffer[photoToLoad.path]
-                        preloadNext()
+                        preloadNext(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(bitmap)
                     }
@@ -210,13 +217,13 @@ class PhotoBufferManager @Inject constructor(
                     _loadingState.value = BufferLoadingState.Loading
                 }
 
-                // STEP 2: Load photo WITHOUT holding mutex (with timeout)
+                // STEP 2: Load photo WITHOUT holding mutex (with dynamic timeout)
                 val loadResult = try {
-                    withTimeout(PHOTO_LOAD_TIMEOUT_MS) {
+                    withTimeout(timeoutPerAttempt) {
                         imageCache.load(photoToLoad.path)
                     }
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${PHOTO_LOAD_TIMEOUT_MS}ms, trying next")
+                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying next")
                     retriesSoFar++
                     continue
                 }
@@ -226,7 +233,7 @@ class PhotoBufferManager @Inject constructor(
                     is Result.Success -> {
                         mutex.withLock {
                             addToBuffer(photoToLoad.path, loadResult.data)
-                            preloadNext()
+                            preloadNext(displayIntervalMs)
                             _loadingState.value = BufferLoadingState.Ready
                         }
                         return Result.success(loadResult.data)
@@ -269,11 +276,18 @@ class PhotoBufferManager @Inject constructor(
      *
      * Thread Safety: Safe to call concurrently. Mutex is released during IO operations.
      *
+     * @param displayIntervalMs Display interval in milliseconds for dynamic timeout calculation
      * @return Result.Success with previous photo bitmap (or null for videos), Result.Error if all photos failed
      */
-    suspend fun getPreviousPhoto(): Result<Bitmap?> {
-        // Reduce retries from 10 to 3 as we now have timeouts
-        val maxRetries = 3
+    suspend fun getPreviousPhoto(displayIntervalMs: Long = 10_000L): Result<Bitmap?> {
+        // FIX A: Timeout EQUALS display interval (user requirement: "equal to configured delay")
+        // Changed from 70% to 100% to meet requirement
+        val timeoutPerAttempt = displayIntervalMs.coerceAtLeast(2_000L)
+
+        // FIX A: Single retry only (worst case = timeout = interval)
+        // Changed from adaptive 1-3 retries to ensure total time ≤ interval
+        val maxRetries = 1
+
         var retriesSoFar = 0
 
         while (retriesSoFar < maxRetries) {
@@ -298,7 +312,7 @@ class PhotoBufferManager @Inject constructor(
                     // Handle videos immediately
                     if (photoToLoad.isVideo) {
                         android.util.Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
-                        preloadPrevious()
+                        preloadPrevious(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(null)
                     }
@@ -306,7 +320,7 @@ class PhotoBufferManager @Inject constructor(
                     // If in buffer, return it
                     if (isInBuffer) {
                         val bitmap = buffer[photoToLoad.path]
-                        preloadPrevious()
+                        preloadPrevious(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(bitmap)
                     }
@@ -315,13 +329,13 @@ class PhotoBufferManager @Inject constructor(
                     _loadingState.value = BufferLoadingState.Loading
                 }
 
-                // STEP 2: Load photo WITHOUT holding mutex (with timeout)
+                // STEP 2: Load photo WITHOUT holding mutex (with dynamic timeout)
                 val loadResult = try {
-                    withTimeout(PHOTO_LOAD_TIMEOUT_MS) {
+                    withTimeout(timeoutPerAttempt) {
                         imageCache.load(photoToLoad.path)
                     }
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${PHOTO_LOAD_TIMEOUT_MS}ms, trying previous")
+                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying previous")
                     retriesSoFar++
                     continue
                 }
@@ -331,7 +345,7 @@ class PhotoBufferManager @Inject constructor(
                     is Result.Success -> {
                         mutex.withLock {
                             addToBuffer(photoToLoad.path, loadResult.data)
-                            preloadPrevious()
+                            preloadPrevious(displayIntervalMs)
                             _loadingState.value = BufferLoadingState.Ready
                         }
                         return Result.success(loadResult.data)
@@ -370,8 +384,12 @@ class PhotoBufferManager @Inject constructor(
      *
      * Note: Must be called within mutex lock.
      */
-    private fun preloadNext() {
+    private fun preloadNext(displayIntervalMs: Long = 10_000L) {
         if (photos.isEmpty()) return
+
+        // PRELOAD FIX: Dynamic preload timeout based on display interval
+        // 80% of interval to complete before next advance, min 2s, max 10s
+        val preloadTimeout = (displayIntervalMs * 0.8).toLong().coerceIn(2_000L, 10_000L)
 
         // Preload next 2 photos ahead for smoother playback
         for (i in 1..2) {
@@ -391,7 +409,20 @@ class PhotoBufferManager @Inject constructor(
 
             // Start new preload job
             val job = CoroutineScope(ioDispatcher).launch {
-                when (val result = imageCache.load(photoToPreload.path)) {
+                // PRELOAD FIX: Use dynamic timeout instead of fixed 5s
+                val result = try {
+                    withTimeout(preloadTimeout) {
+                        imageCache.load(photoToPreload.path)
+                    }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    android.util.Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
+                    mutex.withLock {
+                        preloadJobs.remove(photoToPreload.path)
+                    }
+                    return@launch
+                }
+
+                when (result) {
                     is Result.Success -> {
                         mutex.withLock {
                             addToBuffer(photoToPreload.path, result.data)
@@ -423,8 +454,12 @@ class PhotoBufferManager @Inject constructor(
      *
      * Note: Must be called within mutex lock.
      */
-    private fun preloadPrevious() {
+    private fun preloadPrevious(displayIntervalMs: Long = 10_000L) {
         if (photos.isEmpty()) return
+
+        // PRELOAD FIX: Dynamic preload timeout based on display interval
+        // 80% of interval to complete before next advance, min 2s, max 10s
+        val preloadTimeout = (displayIntervalMs * 0.8).toLong().coerceIn(2_000L, 10_000L)
 
         // Preload previous 1-2 photos for backward navigation
         for (i in 1..1) {  // Only 1 previous for backward, since forward is more common
@@ -444,7 +479,20 @@ class PhotoBufferManager @Inject constructor(
 
             // Start new preload job
             val job = CoroutineScope(ioDispatcher).launch {
-                when (val result = imageCache.load(photoToPreload.path)) {
+                // PRELOAD FIX: Use dynamic timeout instead of fixed 5s
+                val result = try {
+                    withTimeout(preloadTimeout) {
+                        imageCache.load(photoToPreload.path)
+                    }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    android.util.Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
+                    mutex.withLock {
+                        preloadJobs.remove(photoToPreload.path)
+                    }
+                    return@launch
+                }
+
+                when (result) {
                     is Result.Success -> {
                         mutex.withLock {
                             addToBuffer(photoToPreload.path, result.data)
@@ -486,8 +534,19 @@ class PhotoBufferManager @Inject constructor(
             android.util.Log.d(TAG, "preloadInitialBuffer: Current item is video, skipping bitmap load: ${currentPhoto.fileName}")
             _loadingState.value = BufferLoadingState.Ready
         } else {
+            // Fix #3: Add timeout to initial photo load to prevent indefinite hangs
             // Load current photo synchronously (blocking) - CRITICAL FIX for black screen
-            when (val result = imageCache.load(currentPhoto.path)) {
+            val result = try {
+                withTimeout(PRELOAD_TIMEOUT_MS) {
+                    imageCache.load(currentPhoto.path)
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                android.util.Log.e(TAG, "preloadInitialBuffer: Timeout loading current photo after ${PRELOAD_TIMEOUT_MS}ms")
+                _loadingState.value = BufferLoadingState.Error(e)
+                return
+            }
+
+            when (result) {
                 is Result.Success -> {
                     addToBuffer(currentPhoto.path, result.data)
                     _loadingState.value = BufferLoadingState.Ready
@@ -516,7 +575,17 @@ class PhotoBufferManager @Inject constructor(
                 }
 
                 if (!buffer.containsKey(photo.path)) {
-                    when (val result = imageCache.load(photo.path)) {
+                    // Fix #3: Add timeout to preload operations to prevent indefinite hangs
+                    val result = try {
+                        withTimeout(PRELOAD_TIMEOUT_MS) {
+                            imageCache.load(photo.path)
+                        }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        android.util.Log.w(TAG, "preloadInitialBuffer: Timeout preloading ${photo.fileName} after ${PRELOAD_TIMEOUT_MS}ms")
+                        continue
+                    }
+
+                    when (result) {
                         is Result.Success -> {
                             mutex.withLock {
                                 addToBuffer(photo.path, result.data)
@@ -634,10 +703,17 @@ class PhotoBufferManager @Inject constructor(
         const val BUFFER_SIZE = 5
 
         /**
-         * Photo load timeout: 15 seconds per photo.
-         * Prevents indefinite hangs on slow/unreachable SMB servers.
+         * Photo load timeout: 15 seconds per photo (DEPRECATED - now using dynamic timeout).
+         * Kept for reference only. New code uses dynamic timeout based on display interval.
          */
+        @Deprecated("Use dynamic timeout parameter in getNextPhoto/getPreviousPhoto")
         private const val PHOTO_LOAD_TIMEOUT_MS = 15_000L
+
+        /**
+         * Preload timeout: 5 seconds per photo.
+         * Fix #3: Prevents indefinite hangs during background preloading.
+         */
+        private const val PRELOAD_TIMEOUT_MS = 5_000L
 
         private const val TAG = "PhotoBufferManager"
     }

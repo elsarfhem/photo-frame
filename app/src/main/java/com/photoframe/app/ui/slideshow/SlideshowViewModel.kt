@@ -80,6 +80,12 @@ class SlideshowViewModel @Inject constructor(
     // Auto-advance job
     private var autoAdvanceJob: Job? = null
 
+    // Next photo job for cancel-and-replace pattern (prevents coroutine pile-up)
+    private var nextPhotoJob: Job? = null
+
+    // Previous photo job for cancel-and-replace pattern (prevents coroutine pile-up)
+    private var previousPhotoJob: Job? = null
+
     // Network recovery job
     private var networkRecoveryJob: Job? = null
     private var isNetworkDisconnected = false
@@ -396,13 +402,16 @@ class SlideshowViewModel @Inject constructor(
                     startWatchdogService(interval)
                 }
 
-                // Wait for interval
-                delay(interval)
-
-                // Advance to next photo (skip for videos - they advance via onVideoEnded callback)
+                // FIX D: Advance to next photo FIRST (skip for videos - they advance via onVideoEnded callback)
                 if (_state.value.isPlaying && _state.value.currentPhotoMetadata?.isVideo != true) {
-                    nextPhoto()
+                    // Pass display interval for dynamic timeout calculation
+                    nextPhoto(pauseAutoAdvance = false, displayIntervalMs = interval)
                 }
+
+                // FIX D: THEN wait for interval (so photo displays for full duration)
+                // Previously: delay was BEFORE nextPhoto, meaning photo displayed for 0s
+                // Now: delay is AFTER nextPhoto, so photo displays for full interval
+                delay(interval)
             }
         }
     }
@@ -418,6 +427,10 @@ class SlideshowViewModel @Inject constructor(
         _state.update { it.copy(isPlaying = false) }
         autoAdvanceJob?.cancel()
         autoAdvanceJob = null
+        nextPhotoJob?.cancel()
+        nextPhotoJob = null
+        previousPhotoJob?.cancel()
+        previousPhotoJob = null
 
         // Phase 4: Stop watchdog service
         stopWatchdogService()
@@ -432,8 +445,9 @@ class SlideshowViewModel @Inject constructor(
      * Thread Safety: Safe to call from main thread.
      *
      * @param pauseAutoAdvance If true, pauses auto-advance (default true for manual navigation)
+     * @param displayIntervalMs Display interval for dynamic timeout calculation (only used for auto-advance)
      */
-    fun nextPhoto(pauseAutoAdvance: Boolean = false) {
+    fun nextPhoto(pauseAutoAdvance: Boolean = false, displayIntervalMs: Long = 10_000L) {
         // Guard: Don't allow navigation before initialization completes
         if (!isInitialized) {
             android.util.Log.w("SlideshowViewModel", "nextPhoto called before initialization, ignoring")
@@ -447,8 +461,14 @@ class SlideshowViewModel @Inject constructor(
         // Set navigation direction for transition animation
         _state.update { it.copy(navigationDirection = NavigationDirection.FORWARD) }
 
-        viewModelScope.launch {
-            val result = slideshowRepository.nextPhoto()
+        // Fix #1: Cancel previous auto-advance job to prevent coroutine pile-up
+        if (!pauseAutoAdvance) {
+            nextPhotoJob?.cancel()
+        }
+
+        val job = viewModelScope.launch {
+            // Fix #2: Pass display interval for dynamic timeout calculation
+            val result = slideshowRepository.nextPhoto(displayIntervalMs)
             // Note: State updates now handled reactively by combine flow observing repository StateFlows
 
             android.util.Log.d("SlideshowViewModel", "nextPhoto: result=${result.javaClass.simpleName}")
@@ -486,6 +506,11 @@ class SlideshowViewModel @Inject constructor(
                 }
             }
         }
+
+        // Fix #1: Track job for auto-advance (allows cancellation)
+        if (!pauseAutoAdvance) {
+            nextPhotoJob = job
+        }
     }
 
     /**
@@ -496,7 +521,7 @@ class SlideshowViewModel @Inject constructor(
      *
      * @param pauseAutoAdvance If true, pauses auto-advance (default true for manual navigation)
      */
-    fun previousPhoto(pauseAutoAdvance: Boolean = false) {
+    fun previousPhoto(pauseAutoAdvance: Boolean = false, displayIntervalMs: Long = 10_000L) {
         // Guard: Don't allow navigation before initialization completes
         if (!isInitialized) {
             android.util.Log.w("SlideshowViewModel", "previousPhoto called before initialization, ignoring")
@@ -510,8 +535,14 @@ class SlideshowViewModel @Inject constructor(
         // Set navigation direction for transition animation
         _state.update { it.copy(navigationDirection = NavigationDirection.BACKWARD) }
 
-        viewModelScope.launch {
-            val result = slideshowRepository.previousPhoto()
+        // FIX C: Cancel previous job to prevent coroutine pile-up (matching nextPhoto pattern)
+        if (!pauseAutoAdvance) {
+            previousPhotoJob?.cancel()
+        }
+
+        val job = viewModelScope.launch {
+            // FIX C: Pass display interval for dynamic timeout calculation
+            val result = slideshowRepository.previousPhoto(displayIntervalMs)
             // Note: State updates now handled reactively by combine flow observing repository StateFlows
 
             android.util.Log.d("SlideshowViewModel", "previousPhoto: result=${result.javaClass.simpleName}")
@@ -531,6 +562,11 @@ class SlideshowViewModel @Inject constructor(
                     // Should not happen
                 }
             }
+        }
+
+        // FIX C: Track job for cancellation (matching nextPhoto pattern)
+        if (!pauseAutoAdvance) {
+            previousPhotoJob = job
         }
     }
 
@@ -621,6 +657,8 @@ class SlideshowViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         autoAdvanceJob?.cancel()
+        nextPhotoJob?.cancel()
+        previousPhotoJob?.cancel()
         networkRecoveryJob?.cancel()
         stopWatchdogService()
     }

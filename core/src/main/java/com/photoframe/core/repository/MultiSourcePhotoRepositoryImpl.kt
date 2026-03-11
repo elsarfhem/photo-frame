@@ -403,7 +403,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun nextPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
+    override suspend fun nextPhoto(displayIntervalMs: Long): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -413,7 +413,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 )
             }
 
-            val result = photoBufferManager.getNextPhoto()
+            val result = photoBufferManager.getNextPhoto(displayIntervalMs)
             when (result) {
                 is Result.Success -> {
                     // Note: Don't increment index here - PhotoBufferManager already did it
@@ -440,7 +440,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun previousPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
+    override suspend fun previousPhoto(displayIntervalMs: Long): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -450,7 +450,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 )
             }
 
-            val result = photoBufferManager.getPreviousPhoto()
+            val result = photoBufferManager.getPreviousPhoto(displayIntervalMs)
             when (result) {
                 is Result.Success -> {
                     // Note: Don't decrement index here - PhotoBufferManager already did it

@@ -78,4 +78,5 @@ vcs.xml
 Thumbs.db
 
 .idea
+.serena
 firebase-debug.log

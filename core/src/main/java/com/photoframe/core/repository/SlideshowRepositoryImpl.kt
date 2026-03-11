@@ -297,7 +297,7 @@ class SlideshowRepositoryImpl @Inject constructor(
      *
      * Thread Safety: Safe to call concurrently.
      */
-    override suspend fun nextPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
+    override suspend fun nextPhoto(displayIntervalMs: Long): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -307,8 +307,8 @@ class SlideshowRepositoryImpl @Inject constructor(
                 )
             }
 
-            // Get next photo from buffer
-            val result = photoBufferManager.getNextPhoto()
+            // Get next photo from buffer with dynamic timeout
+            val result = photoBufferManager.getNextPhoto(displayIntervalMs)
             when (result) {
                 is Result.Success -> {
                     // Note: Don't increment index here - PhotoBufferManager already did it
@@ -343,7 +343,7 @@ class SlideshowRepositoryImpl @Inject constructor(
      *
      * Thread Safety: Safe to call concurrently.
      */
-    override suspend fun previousPhoto(): Result<Bitmap?> = withContext(ioDispatcher) {
+    override suspend fun previousPhoto(displayIntervalMs: Long): Result<Bitmap?> = withContext(ioDispatcher) {
         return@withContext mutex.withLock {
             val currentPhotos = _photos.value
             if (currentPhotos.isEmpty()) {
@@ -353,8 +353,8 @@ class SlideshowRepositoryImpl @Inject constructor(
                 )
             }
 
-            // Get previous photo from buffer
-            val result = photoBufferManager.getPreviousPhoto()
+            // Get previous photo from buffer with dynamic timeout
+            val result = photoBufferManager.getPreviousPhoto(displayIntervalMs)
             when (result) {
                 is Result.Success -> {
                     // Note: Don't decrement index here - PhotoBufferManager already did it
