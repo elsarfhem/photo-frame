@@ -3,7 +3,6 @@ package com.photoframe.app.ui.settings
 import com.photoframe.core.model.SlideshowSettings
 import com.photoframe.core.model.SmbConnection
 import com.photoframe.core.model.TransitionType
-import java.time.LocalTime
 
 /**
  * UI state for the Settings screen.
@@ -18,9 +17,7 @@ import java.time.LocalTime
  * @property displayInterval Display interval in seconds
  * @property transitionType Transition effect type
  * @property shuffleEnabled Shuffle mode enabled
- * @property scheduleEnabled Schedule automation enabled
- * @property scheduleStartTime Schedule start time
- * @property scheduleEndTime Schedule end time
+ * @property panAnimationEnabled Pan animation enabled
  * @property isTestingConnection True when testing SMB connection
  * @property connectionTestResult Result of connection test (null = not tested)
  * @property isSaving True when saving settings
@@ -41,11 +38,6 @@ data class SettingsState(
     val transitionType: TransitionType = TransitionType.DEFAULT,
     val shuffleEnabled: Boolean = false,
     val panAnimationEnabled: Boolean = true,
-
-    // Schedule Settings
-    val scheduleEnabled: Boolean = false,
-    val scheduleStartTime: LocalTime = SlideshowSettings.DEFAULT_START_TIME,
-    val scheduleEndTime: LocalTime = SlideshowSettings.DEFAULT_END_TIME,
 
     // UI State
     val isTestingConnection: Boolean = false,

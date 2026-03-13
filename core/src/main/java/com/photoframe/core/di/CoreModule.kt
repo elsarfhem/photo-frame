@@ -180,9 +180,11 @@ object CoreModule {
         photoSourceFactory: PhotoSourceFactory,
         photoBufferManager: PhotoBufferManager,
         photoDao: PhotoDao,
+        smbClient: SmbClient,
+        credentialStore: CredentialStore,
         @IoDispatcher ioDispatcher: CoroutineDispatcher
     ): MultiSourcePhotoRepositoryImpl {
-        return MultiSourcePhotoRepositoryImpl(photoSourcesManager, photoSourceFactory, photoBufferManager, photoDao, ioDispatcher)
+        return MultiSourcePhotoRepositoryImpl(photoSourcesManager, photoSourceFactory, photoBufferManager, photoDao, smbClient, credentialStore, ioDispatcher)
     }
 
     @Provides

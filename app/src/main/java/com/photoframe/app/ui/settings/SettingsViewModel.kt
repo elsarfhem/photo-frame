@@ -6,7 +6,6 @@ import com.photoframe.core.model.Result
 import com.photoframe.core.model.SlideshowSettings
 import com.photoframe.core.model.SmbConnection
 import com.photoframe.core.repository.SettingsRepository
-import com.photoframe.core.scheduling.ScheduleManager
 import com.photoframe.core.smb.SmbClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,16 +25,13 @@ import javax.inject.Inject
  *
  * Thread Safety: All public methods are safe to call from main thread.
  *
- * Phase 5: Settings & Scheduling
- *
  * @param settingsRepository Repository for loading/saving settings
  * @param smbClient Client for testing SMB connection
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val smbClient: SmbClient,
-    private val scheduleManager: ScheduleManager
+    private val smbClient: SmbClient
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState.EMPTY)
@@ -77,9 +73,6 @@ class SettingsViewModel @Inject constructor(
                     transitionType = settings.transitionType,
                     shuffleEnabled = settings.shuffleEnabled,
                     panAnimationEnabled = settings.panAnimationEnabled,
-                    scheduleEnabled = settings.scheduleEnabled,
-                    scheduleStartTime = settings.scheduleStartTime,
-                    scheduleEndTime = settings.scheduleEndTime,
                     isModified = false
                 )
             }
@@ -187,38 +180,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Toggles schedule mode.
-     */
-    fun toggleSchedule(enabled: Boolean) {
-        _state.value = _state.value.copy(
-            scheduleEnabled = enabled,
-            isModified = true
-        )
-    }
-
-    /**
-     * Updates schedule start time.
-     */
-    fun updateScheduleStartTime(time: java.time.LocalTime) {
-        _state.value = _state.value.copy(
-            scheduleStartTime = time,
-            isModified = true
-        )
-        validateScheduleTimes()
-    }
-
-    /**
-     * Updates schedule end time.
-     */
-    fun updateScheduleEndTime(time: java.time.LocalTime) {
-        _state.value = _state.value.copy(
-            scheduleEndTime = time,
-            isModified = true
-        )
-        validateScheduleTimes()
-    }
-
-    /**
      * Tests the SMB connection with current settings.
      */
     fun testConnection() {
@@ -286,24 +247,10 @@ class SettingsViewModel @Inject constructor(
                 displayIntervalSeconds = currentState.displayInterval,
                 transitionType = currentState.transitionType,
                 shuffleEnabled = currentState.shuffleEnabled,
-                panAnimationEnabled = currentState.panAnimationEnabled,
-                scheduleEnabled = currentState.scheduleEnabled,
-                scheduleStartTime = currentState.scheduleStartTime,
-                scheduleEndTime = currentState.scheduleEndTime
+                panAnimationEnabled = currentState.panAnimationEnabled
             )
 
             val settingsResult = settingsRepository.saveSlideshowSettings(slideshowSettings)
-
-            // Wire up schedule manager based on settings
-            if (settingsResult is Result.Success) {
-                if (slideshowSettings.scheduleEnabled) {
-                    val scheduled = scheduleManager.scheduleDaily(slideshowSettings)
-                    android.util.Log.i("SettingsViewModel", "Schedule activated: $scheduled")
-                } else {
-                    scheduleManager.cancelSchedule()
-                    android.util.Log.i("SettingsViewModel", "Schedule cancelled")
-                }
-            }
 
             _state.value = _state.value.copy(
                 isSaving = false,
@@ -328,9 +275,6 @@ class SettingsViewModel @Inject constructor(
             transitionType = com.photoframe.core.model.TransitionType.DEFAULT,
             shuffleEnabled = false,
             panAnimationEnabled = true,
-            scheduleEnabled = false,
-            scheduleStartTime = SlideshowSettings.DEFAULT_START_TIME,
-            scheduleEndTime = SlideshowSettings.DEFAULT_END_TIME,
             isModified = true
         )
     }
@@ -357,7 +301,6 @@ class SettingsViewModel @Inject constructor(
     private fun validateAllFields(): Boolean {
         // SMB validation removed - SMB config now managed in separate Photo Sources screen
         validateDisplayInterval()
-        validateScheduleTimes()
 
         return _state.value.validationErrors.isEmpty()
     }
@@ -432,36 +375,4 @@ class SettingsViewModel @Inject constructor(
         _state.value = _state.value.copy(validationErrors = errors)
     }
 
-    /**
-     * Validates schedule times (start must be before end).
-     *
-     * Only validates if schedule is enabled.
-     */
-    private fun validateScheduleTimes() {
-        val errors = _state.value.validationErrors.toMutableMap()
-        val currentState = _state.value
-
-        if (!currentState.scheduleEnabled) {
-            errors.remove("scheduleTime")
-            _state.value = _state.value.copy(validationErrors = errors)
-            return
-        }
-
-        val startTime = currentState.scheduleStartTime
-        val endTime = currentState.scheduleEndTime
-
-        when {
-            startTime == endTime -> {
-                errors["scheduleTime"] = "Start time and end time cannot be the same"
-            }
-            startTime.isAfter(endTime) -> {
-                errors["scheduleTime"] = "Start time must be before end time"
-            }
-            else -> {
-                errors.remove("scheduleTime")
-            }
-        }
-
-        _state.value = _state.value.copy(validationErrors = errors)
-    }
 }

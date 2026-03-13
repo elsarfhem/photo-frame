@@ -1,10 +1,5 @@
 package com.photoframe.app
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,9 +17,7 @@ import com.photoframe.core.data.PhotoSourcesManager
 import com.photoframe.core.model.Result
 import com.photoframe.core.observer.MediaStoreObserver
 import com.photoframe.core.repository.SettingsRepository
-import com.photoframe.core.scheduling.ScheduleWorker
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -33,10 +26,7 @@ import javax.inject.Inject
  * Features:
  * - Locked to landscape orientation (configured in AndroidManifest.xml)
  * - Navigation between slideshow and settings
- * - Auto-start slideshow if SMB is configured
- * - Handles scheduled start/stop broadcasts from ScheduleWorker
- *
- * Phase 5: Settings & Scheduling
+ * - Auto-start slideshow if sources are configured
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -50,16 +40,11 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var photoSourcesManager: PhotoSourcesManager
 
-    private var scheduleReceiver: ScheduleBroadcastReceiver? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Start MediaStore observer for real-time photo detection
         mediaStoreObserver.start()
-
-        // Register broadcast receiver for scheduled actions
-        registerScheduleReceiver()
 
         setContent {
             PhotoFrameTheme {
@@ -76,62 +61,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mediaStoreObserver.stop()
-        unregisterScheduleReceiver()
-    }
-
-    /**
-     * Registers broadcast receiver for scheduled start/stop events.
-     */
-    private fun registerScheduleReceiver() {
-        scheduleReceiver = ScheduleBroadcastReceiver { action ->
-            when (action) {
-                ScheduleWorker.ACTION_SCHEDULE_START_SLIDESHOW -> {
-                    android.util.Log.i("MainActivity", "Scheduled start received")
-                    // Screen is already displayed, just ensure we're on slideshow
-                }
-                ScheduleWorker.ACTION_SCHEDULE_STOP_SLIDESHOW -> {
-                    android.util.Log.i("MainActivity", "Scheduled stop received")
-                    // In production, you might finish() the activity or pause slideshow
-                }
-            }
-        }
-
-        val filter = IntentFilter().apply {
-            addAction(ScheduleWorker.ACTION_SCHEDULE_START_SLIDESHOW)
-            addAction(ScheduleWorker.ACTION_SCHEDULE_STOP_SLIDESHOW)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(scheduleReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(scheduleReceiver, filter)
-        }
-    }
-
-    /**
-     * Unregisters broadcast receiver.
-     */
-    private fun unregisterScheduleReceiver() {
-        scheduleReceiver?.let {
-            try {
-                unregisterReceiver(it)
-            } catch (e: IllegalArgumentException) {
-                // Already unregistered
-            }
-        }
-        scheduleReceiver = null
-    }
-
-    /**
-     * Broadcast receiver for scheduled slideshow events.
-     */
-    private class ScheduleBroadcastReceiver(
-        private val onAction: (String) -> Unit
-    ) : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.action?.let { onAction(it) }
-        }
     }
 }
 

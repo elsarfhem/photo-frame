@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
@@ -17,13 +16,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.photoframe.core.model.TransitionType
-import java.time.format.DateTimeFormatter
 
 /**
- * Settings screen for configuring photo sources, display settings, and schedule.
+ * Settings screen for configuring photo sources and display settings.
  *
  * Material 3 design with form sections.
- * Phase 5: Settings & Scheduling
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,16 +82,6 @@ fun SettingsScreen(
                 onTransitionChange = viewModel::updateTransitionType,
                 onShuffleChange = viewModel::toggleShuffle,
                 onPanAnimationChange = viewModel::togglePanAnimation
-            )
-
-            Divider()
-
-            // Schedule Section
-            ScheduleSection(
-                state = state,
-                onScheduleEnabledChange = viewModel::toggleSchedule,
-                onStartTimeChange = viewModel::updateScheduleStartTime,
-                onEndTimeChange = viewModel::updateScheduleEndTime
             )
 
             Divider()
@@ -256,130 +243,6 @@ private fun DisplaySettingsSection(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ScheduleSection(
-    state: SettingsState,
-    onScheduleEnabledChange: (Boolean) -> Unit,
-    onStartTimeChange: (java.time.LocalTime) -> Unit,
-    onEndTimeChange: (java.time.LocalTime) -> Unit
-) {
-    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    var showStartTimePicker by remember { mutableStateOf(false) }
-    var showEndTimePicker by remember { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = "Schedule",
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.semantics { heading() }
-        )
-
-        // Schedule Enable Toggle
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp), // Minimum touch target
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Enable Schedule",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Switch(
-                checked = state.scheduleEnabled,
-                onCheckedChange = onScheduleEnabledChange,
-                modifier = Modifier.semantics {
-                    contentDescription = if (state.scheduleEnabled) {
-                        "Schedule enabled"
-                    } else {
-                        "Schedule disabled"
-                    }
-                }
-            )
-        }
-
-        if (state.scheduleEnabled) {
-            // Start Time
-            OutlinedTextField(
-                value = state.scheduleStartTime.format(timeFormatter),
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Start Time") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = state.scheduleEnabled,
-                trailingIcon = {
-                    IconButton(onClick = { showStartTimePicker = true }) {
-                        Icon(
-                            imageVector = Icons.Default.AccessTime,
-                            contentDescription = "Pick start time"
-                        )
-                    }
-                }
-            )
-
-            // End Time
-            OutlinedTextField(
-                value = state.scheduleEndTime.format(timeFormatter),
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("End Time") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = state.scheduleEnabled,
-                trailingIcon = {
-                    IconButton(onClick = { showEndTimePicker = true }) {
-                        Icon(
-                            imageVector = Icons.Default.AccessTime,
-                            contentDescription = "Pick end time"
-                        )
-                    }
-                }
-            )
-
-            // Validation error for schedule times
-            state.validationErrors["scheduleTime"]?.let { error ->
-                Text(
-                    text = error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 16.dp)
-                )
-            }
-
-            Text(
-                text = "Note: Schedule requires WorkManager to be enabled",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    // Time Picker Dialogs
-    if (showStartTimePicker) {
-        TimePickerDialog(
-            initialTime = state.scheduleStartTime,
-            onTimeSelected = { time ->
-                onStartTimeChange(time)
-                showStartTimePicker = false
-            },
-            onDismiss = { showStartTimePicker = false }
-        )
-    }
-
-    if (showEndTimePicker) {
-        TimePickerDialog(
-            initialTime = state.scheduleEndTime,
-            onTimeSelected = { time ->
-                onEndTimeChange(time)
-                showEndTimePicker = false
-            },
-            onDismiss = { showEndTimePicker = false }
-        )
-    }
-}
-
 @Composable
 private fun ActionButtons(
     state: SettingsState,
@@ -486,51 +349,6 @@ private fun formatInterval(seconds: Int): String {
         seconds < 3600 -> "${seconds / 60} min"
         else -> "${seconds / 3600} hr"
     }
-}
-
-/**
- * Material 3 Time Picker Dialog.
- *
- * Allows user to select hour and minute using Material3 TimePicker component.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TimePickerDialog(
-    initialTime: java.time.LocalTime,
-    onTimeSelected: (java.time.LocalTime) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val timePickerState = rememberTimePickerState(
-        initialHour = initialTime.hour,
-        initialMinute = initialTime.minute,
-        is24Hour = true
-    )
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Select Time") },
-        text = {
-            TimePicker(state = timePickerState)
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val selectedTime = java.time.LocalTime.of(
-                        timePickerState.hour,
-                        timePickerState.minute
-                    )
-                    onTimeSelected(selectedTime)
-                }
-            ) {
-                Text("OK")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }
 
 /**

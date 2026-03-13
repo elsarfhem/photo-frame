@@ -14,7 +14,6 @@ import kotlinx.coroutines.test.*
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
-import java.time.LocalTime
 
 /**
  * Unit tests for SettingsViewModel.
@@ -25,8 +24,6 @@ import java.time.LocalTime
  * - Saving settings
  * - Testing SMB connection
  * - Resetting to defaults
- *
- * Phase 5: Settings & Scheduling
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
@@ -73,8 +70,8 @@ class SettingsViewModelTest {
     @Test
     fun `loads SMB connection from repository`() = runTest {
         val connection = SmbConnection(
-            server = "192.168.1.100",
-            share = "photos",
+            serverUrl = "192.168.1.100",
+            sharePath = "photos",
             username = "user",
             domain = null
         )
@@ -96,8 +93,7 @@ class SettingsViewModelTest {
         val settings = SlideshowSettings(
             displayIntervalSeconds = 30,
             transitionType = TransitionType.FADE,
-            shuffleEnabled = true,
-            scheduleEnabled = false
+            shuffleEnabled = true
         )
         coEvery { settingsRepository.loadSlideshowSettings() } returns Result.Success(settings)
 
@@ -255,7 +251,6 @@ class SettingsViewModelTest {
         assert(state.displayInterval == SlideshowSettings.DEFAULT_DISPLAY_INTERVAL_SECONDS)
         assert(state.transitionType == TransitionType.DEFAULT)
         assert(!state.shuffleEnabled)
-        assert(!state.scheduleEnabled)
         assert(state.isModified)
     }
 
@@ -268,18 +263,6 @@ class SettingsViewModelTest {
 
         val state = viewModel.state.value
         assert(state.shuffleEnabled)
-        assert(state.isModified)
-    }
-
-    @Test
-    fun `toggleSchedule changes schedule state`() = runTest {
-        viewModel = SettingsViewModel(settingsRepository, smbClient)
-        testDispatcher.scheduler.advanceUntilIdle()
-
-        viewModel.toggleSchedule(true)
-
-        val state = viewModel.state.value
-        assert(state.scheduleEnabled)
         assert(state.isModified)
     }
 
@@ -304,19 +287,6 @@ class SettingsViewModelTest {
 
         val state = viewModel.state.value
         assert(state.transitionType == TransitionType.SLIDE)
-        assert(state.isModified)
-    }
-
-    @Test
-    fun `updateScheduleStartTime changes start time`() = runTest {
-        viewModel = SettingsViewModel(settingsRepository, smbClient)
-        testDispatcher.scheduler.advanceUntilIdle()
-
-        val newTime = LocalTime.of(9, 30)
-        viewModel.updateScheduleStartTime(newTime)
-
-        val state = viewModel.state.value
-        assert(state.scheduleStartTime == newTime)
         assert(state.isModified)
     }
 
