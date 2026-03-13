@@ -140,6 +140,10 @@ fun SlideshowScreen(
                     photoIndex = state.photoIndex,
                     totalPhotos = state.totalPhotos,
                     transitionType = state.transitionType,
+                    isPlaying = state.isPlaying,
+                    displayIntervalMillis = state.displayIntervalMillis,
+                    panAnimationEnabled = state.panAnimationEnabled,
+                    navigationDirection = state.navigationDirection,
                     viewModel = viewModel,
                     onNavigateToSettings = onNavigateToSettings
                 )
@@ -287,6 +291,10 @@ private fun EmptyContent() {
  * @param photoIndex Current media index (0-based)
  * @param totalPhotos Total number of media items
  * @param transitionType Type of transition effect to apply
+ * @param isPlaying Whether slideshow auto-advance is active
+ * @param displayIntervalMillis Display interval for animations
+ * @param panAnimationEnabled Whether pan animation is enabled
+ * @param navigationDirection Direction of navigation (forward/backward)
  * @param viewModel Slideshow view model
  * @param onNavigateToSettings Callback to navigate to settings screen
  */
@@ -297,13 +305,16 @@ private fun MediaContent(
     photoIndex: Int,
     totalPhotos: Int,
     transitionType: com.photoframe.core.model.TransitionType,
+    isPlaying: Boolean,
+    displayIntervalMillis: Long,
+    panAnimationEnabled: Boolean,
+    navigationDirection: NavigationDirection,
     viewModel: SlideshowViewModel = hiltViewModel(),
     onNavigateToSettings: () -> Unit = {}
 ) {
     val view = LocalView.current
     var dragOffset by remember { mutableStateOf(0f) }
     var showControls by remember { mutableStateOf(false) }
-    val state by viewModel.state.collectAsState()
 
     // Get VideoPlayerViewModel for SmbDataSourceFactory injection
     val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
@@ -370,7 +381,7 @@ private fun MediaContent(
                                 }
                                 else -> {
                                     view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
-                                    if (state.isPlaying) {
+                                    if (isPlaying) {
                                         viewModel.pause()
                                     } else {
                                         viewModel.play()
@@ -393,7 +404,7 @@ private fun MediaContent(
                 if (photoMetadata?.isVideo == true) {
                     EnterTransition.None togetherWith ExitTransition.None
                 } else {
-                    getTransitionSpec(transitionType, state.navigationDirection)
+                    getTransitionSpec(transitionType, navigationDirection)
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -421,16 +432,16 @@ private fun MediaContent(
                         bitmap = bitmap,
                         photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
-                        durationMillis = state.displayIntervalMillis.toInt(),
+                        durationMillis = displayIntervalMillis.toInt(),
                         modifier = Modifier.fillMaxSize()
                     )
-                } else if (state.panAnimationEnabled) {
+                } else if (panAnimationEnabled) {
                     // Apply pan animation with crop (no black bands)
                     PanTransition(
                         bitmap = bitmap,
                         photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
-                        durationMillis = state.displayIntervalMillis.toInt(),
+                        durationMillis = displayIntervalMillis.toInt(),
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
@@ -452,7 +463,7 @@ private fun MediaContent(
         // Show control overlay when tapped
         if (showControls) {
             ControlOverlay(
-                isPlaying = state.isPlaying,
+                isPlaying = isPlaying,
                 photoIndex = photoIndex,
                 totalPhotos = totalPhotos,
                 onNavigateToSettings = onNavigateToSettings

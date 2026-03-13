@@ -9,8 +9,13 @@ import com.photoframe.core.database.toPhoto
 import com.photoframe.core.di.IoDispatcher
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.PhotoSourceConfig
+import com.photoframe.core.model.PhotoSourceType
 import com.photoframe.core.model.Result
+import com.photoframe.core.model.SmbConnection
+import com.photoframe.core.model.SourceConfig
+import com.photoframe.core.security.CredentialStore
 import com.photoframe.core.slideshow.PhotoBufferManager
+import com.photoframe.core.smb.SmbClient
 import com.photoframe.core.source.PhotoSource
 import com.photoframe.core.source.PhotoSourceFactory
 import kotlinx.coroutines.CoroutineDispatcher
@@ -58,6 +63,8 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     private val photoSourceFactory: PhotoSourceFactory,
     private val photoBufferManager: PhotoBufferManager,
     private val photoDao: PhotoDao,
+    private val smbClient: SmbClient,
+    private val credentialStore: CredentialStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : MultiSourcePhotoRepository {
 
@@ -164,6 +171,56 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 // Step 2: If we have cached photos, use them for instant startup
                 if (allCachedPhotos.isNotEmpty()) {
                     Log.d(TAG, "loadPhotos: Found ${allCachedPhotos.size} total cached photos - instant startup!")
+
+                    // CRITICAL: Connect all SMB sources before loading photos
+                    // This ensures SmbFetcher can load photos immediately without "Not connected" errors
+                    Log.d(TAG, "=== COLD STARTUP: Connecting SMB sources before loading...")
+                    for (config in sourceConfigs) {
+                        if (config.type == PhotoSourceType.SMB && config.config is SourceConfig.SmbConfig) {
+                            try {
+                                val smbConfig = config.config
+                                
+                                // Build SMB connection
+                                val serverUrl = "smb://${smbConfig.server}/${smbConfig.share}"
+                                val connection = SmbConnection(
+                                    serverUrl = serverUrl,
+                                    sharePath = smbConfig.path,
+                                    username = smbConfig.username,
+                                    domain = smbConfig.domain
+                                )
+                                
+                                // Get password from credential store
+                                val credentialKey = "photo_source_${config.id}"
+                                val passwordResult = credentialStore.retrievePassword(credentialKey)
+                                
+                                if (passwordResult is Result.Success) {
+                                    val password = passwordResult.data
+                                    
+                                    // Connect if not already connected
+                                    if (!smbClient.isConnected()) {
+                                        Log.d(TAG, "=== COLD STARTUP: Connecting to '${config.displayName}'...")
+                                        val connectResult = smbClient.connect(connection, password)
+                                        when (connectResult) {
+                                            is Result.Success -> {
+                                                Log.d(TAG, "=== COLD STARTUP: Connected to '${config.displayName}' successfully")
+                                            }
+                                            is Result.Error -> {
+                                                Log.w(TAG, "=== COLD STARTUP: Failed to connect to '${config.displayName}': ${connectResult.message}")
+                                            }
+                                            is Result.Loading -> {}
+                                        }
+                                    } else {
+                                        Log.d(TAG, "=== COLD STARTUP: Already connected (reusing connection)")
+                                    }
+                                } else {
+                                    Log.w(TAG, "=== COLD STARTUP: Password not found for '${config.displayName}'")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "=== COLD STARTUP: Exception connecting '${config.displayName}'", e)
+                            }
+                        }
+                    }
+                    Log.d(TAG, "=== COLD STARTUP: SMB connection phase complete")
 
                     var photoList = allCachedPhotos
                     if (shuffleEnabled) {
