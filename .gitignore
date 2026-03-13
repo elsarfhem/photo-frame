@@ -80,4 +80,6 @@ Thumbs.db
 
 .idea
 .serena
+.claude/
+docs/
 firebase-debug.log
