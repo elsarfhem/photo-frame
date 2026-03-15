@@ -25,8 +25,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|screenLayout"
             android:theme="@style/Theme.PhotoFrame">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

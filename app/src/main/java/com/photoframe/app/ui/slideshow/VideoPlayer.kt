@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -24,6 +28,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import com.photoframe.app.media.SmbDataSourceFactory
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 
 /**
@@ -43,6 +48,7 @@ class VideoPlayerViewModel @Inject constructor(
  * - Lifecycle-aware (pauses/resumes with activity)
  * - Callback when video ends
  * - SMB protocol support via custom DataSource
+ * - Buffering timeout: skips to next media if stuck buffering for too long
  *
  * @param videoPath SMB path to video file (e.g., "smb://server/share/video.mp4")
  * @param onVideoEnded Callback invoked when video finishes playing
@@ -60,10 +66,32 @@ fun VideoPlayer(
 
     Log.d(TAG, "VideoPlayer composable invoked for: $videoPath")
 
+    // Track whether onVideoEnded has already been called to prevent double-fire
+    var hasEnded by remember(videoPath) { mutableStateOf(false) }
+
+    val safeOnVideoEnded: () -> Unit = {
+        if (!hasEnded) {
+            hasEnded = true
+            onVideoEnded()
+        }
+    }
+
     // Create ExoPlayer instance
     val exoPlayer = remember(videoPath) {
         Log.d(TAG, "Creating ExoPlayer for: $videoPath")
-        createExoPlayer(context, videoPath, onVideoEnded, smbDataSourceFactory)
+        createExoPlayer(context, videoPath, safeOnVideoEnded, smbDataSourceFactory)
+    }
+
+    // Buffering timeout — if ExoPlayer is stuck buffering for too long, skip
+    LaunchedEffect(videoPath) {
+        delay(VIDEO_BUFFER_TIMEOUT_MS)
+        if (!hasEnded) {
+            val state = exoPlayer.playbackState
+            if (state == Player.STATE_BUFFERING || state == Player.STATE_IDLE) {
+                Log.w(TAG, "Video buffering timeout (${VIDEO_BUFFER_TIMEOUT_MS}ms) for: $videoPath, forcing skip")
+                safeOnVideoEnded()
+            }
+        }
     }
 
     // Release player when composable leaves composition
@@ -166,3 +194,4 @@ private fun createExoPlayer(
 }
 
 private const val TAG = "VideoPlayer"
+private const val VIDEO_BUFFER_TIMEOUT_MS = 30_000L
