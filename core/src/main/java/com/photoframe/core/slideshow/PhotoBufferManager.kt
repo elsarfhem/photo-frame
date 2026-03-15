@@ -703,13 +703,6 @@ class PhotoBufferManager @Inject constructor(
         const val BUFFER_SIZE = 5
 
         /**
-         * Photo load timeout: 15 seconds per photo (DEPRECATED - now using dynamic timeout).
-         * Kept for reference only. New code uses dynamic timeout based on display interval.
-         */
-        @Deprecated("Use dynamic timeout parameter in getNextPhoto/getPreviousPhoto")
-        private const val PHOTO_LOAD_TIMEOUT_MS = 15_000L
-
-        /**
          * Preload timeout: 5 seconds per photo.
          * Fix #3: Prevents indefinite hangs during background preloading.
          */
