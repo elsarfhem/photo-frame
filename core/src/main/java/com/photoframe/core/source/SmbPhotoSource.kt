@@ -60,7 +60,7 @@ class SmbPhotoSource(
      * @return Result.Success with photos (empty list if folder is empty),
      *         Result.Error if scan failed
      */
-    override suspend fun scanPhotos(): Result<List<Photo>> {
+    override suspend fun scanPhotos(maxPhotos: Int?): Result<List<Photo>> {
         Log.d(TAG, "scanPhotos: Starting scan for source '$displayName'")
         Log.d(TAG, "scanPhotos: Server=${connection.serverUrl}, Path=${connection.sharePath}")
 
@@ -88,7 +88,7 @@ class SmbPhotoSource(
 
             // Scan for photos
             Log.d(TAG, "scanPhotos: Starting folder scan...")
-            val scanResult = smbPhotoDataSource.scanFolder(connection)
+            val scanResult = smbPhotoDataSource.scanFolder(connection, maxPhotos = maxPhotos)
             when (scanResult) {
                 is Result.Success -> {
                     // Success - return photos (may be empty list)

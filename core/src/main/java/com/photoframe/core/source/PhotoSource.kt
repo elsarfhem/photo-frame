@@ -74,7 +74,7 @@ interface PhotoSource {
      * @return Result.Success with list of photos (may be empty),
      *         Result.Error if scan failed completely
      */
-    suspend fun scanPhotos(): Result<List<Photo>>
+    suspend fun scanPhotos(maxPhotos: Int? = null): Result<List<Photo>>
 
     /**
      * Validates this source's configuration.

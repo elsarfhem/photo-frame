@@ -53,7 +53,7 @@ class LocalPhotoSource(
      * @return Result.Success with photos (empty list if no photos),
      *         Result.Error if scan failed
      */
-    override suspend fun scanPhotos(): Result<List<Photo>> {
+    override suspend fun scanPhotos(maxPhotos: Int?): Result<List<Photo>> {
         return try {
             if (folderUris.isEmpty()) {
                 // No folders configured - scan all media

@@ -225,6 +225,6 @@ class SmbPhotoDataSource @Inject constructor(
          * Maximum time to scan for photos (30 seconds).
          * Per Senior Dev 3 scalability requirement for large collections.
          */
-        private const val SCAN_TIMEOUT_MS = 30_000L
+        private const val SCAN_TIMEOUT_MS = 300_000L // 5 minutes for large collections (30k+ files)
     }
 }

@@ -252,20 +252,12 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     }
                 }
 
-                // Step 3: No cache or partial cache - scan sources that need it
-                Log.d(TAG, "loadPhotos: Scanning ${sourcesToScan.size} source(s) from network")
-                val scannedPhotos = if (sourcesToScan.isNotEmpty()) {
-                    scanSourcesInParallel(sourcesToScan, saveToDatabase = true)
-                } else {
-                    emptyList()
-                }
+                // Step 3: No cache - do a quick scan first (limited photos) to start
+                // slideshow fast, then complete the full scan in background.
+                Log.d(TAG, "loadPhotos: Quick scan for fast startup, then full scan in background")
 
-                // Combine cached + scanned photos
-                val allPhotos = allCachedPhotos + scannedPhotos
-                Log.d(TAG, "loadPhotos: Total photos: ${allPhotos.size} (cached=${allCachedPhotos.size}, scanned=${scannedPhotos.size})")
-
-                if (allPhotos.isEmpty()) {
-                    Log.w(TAG, "loadPhotos: No photos found in any source!")
+                if (sourcesToScan.isEmpty()) {
+                    Log.w(TAG, "loadPhotos: No sources to scan and no cached photos!")
                     _isLoading.value = false
                     _error.value = "No photos found in any source"
                     return@withContext Result.error(
@@ -274,41 +266,51 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     )
                 }
 
-                // Shuffle if enabled (random mix across all sources)
-                val finalPhotos = if (shuffleEnabled) {
-                    fisherYatesShuffle(allPhotos)
-                } else {
-                    allPhotos
-                }
+                // Quick scan: get first QUICK_SCAN_LIMIT photos to start slideshow fast
+                val quickPhotos = scanSourcesInParallel(sourcesToScan, saveToDatabase = false, maxPhotos = QUICK_SCAN_LIMIT)
 
-                // Initialize buffer BEFORE setting _photos to prevent state desync
-                currentIndex = 0
-                val bufferResult = photoBufferManager.initialize(finalPhotos, currentIndex)
-                if (bufferResult !is Result.Success) {
-                    val errorMsg = if (bufferResult is Result.Error) {
-                        bufferResult.message ?: bufferResult.exception.message
-                    } else {
-                        "Unknown error"
+                if (quickPhotos.isEmpty()) {
+                    // No photos found even in quick scan - do full scan as fallback
+                    Log.w(TAG, "loadPhotos: Quick scan found nothing, trying full scan...")
+                    val fullPhotos = scanSourcesInParallel(sourcesToScan, saveToDatabase = true)
+                    if (fullPhotos.isEmpty()) {
+                        _isLoading.value = false
+                        _error.value = "No photos found in any source"
+                        return@withContext Result.error(
+                            IllegalStateException("No photos found"),
+                            "No photos found in enabled sources"
+                        )
                     }
-                    throw Exception("Failed to initialize buffer: $errorMsg")
+                    val finalPhotos = if (shuffleEnabled) fisherYatesShuffle(fullPhotos) else fullPhotos
+                    currentIndex = 0
+                    val bufferResult = photoBufferManager.initialize(finalPhotos, currentIndex)
+                    if (bufferResult !is Result.Success) throw Exception("Failed to initialize buffer")
+                    _photos.value = finalPhotos
+                    _currentPhoto.value = photoBufferManager.getCurrentPhoto()
+                    _currentPhotoMetadata.value = finalPhotos.getOrNull(currentIndex)
+                    _currentPhotoIndex.value = currentIndex
+                    _isLoading.value = false
+                    _error.value = null
+                    return@withContext Result.success(finalPhotos.size)
                 }
 
-                // Only set _photos AFTER buffer initialization succeeds
-                _photos.value = finalPhotos
-
-                // Get first photo
-                val firstPhoto = photoBufferManager.getCurrentPhoto()
-                _currentPhoto.value = firstPhoto
-                _currentPhotoMetadata.value = finalPhotos.getOrNull(currentIndex)
+                // Start slideshow immediately with quick-scan results
+                val initialPhotos = if (shuffleEnabled) fisherYatesShuffle(quickPhotos) else quickPhotos
+                Log.d(TAG, "loadPhotos: Starting slideshow with ${initialPhotos.size} photos (quick scan)")
+                currentIndex = 0
+                val bufferResult = photoBufferManager.initialize(initialPhotos, currentIndex)
+                if (bufferResult !is Result.Success) throw Exception("Failed to initialize buffer")
+                _photos.value = initialPhotos
+                _currentPhoto.value = photoBufferManager.getCurrentPhoto()
+                _currentPhotoMetadata.value = initialPhotos.getOrNull(currentIndex)
                 _currentPhotoIndex.value = currentIndex
-
                 _isLoading.value = false
                 _error.value = null
 
-                // Start background sync to keep cache fresh
-                startBackgroundSync(sourceConfigs, shuffleEnabled)
+                // Launch full scan in background to discover all remaining photos
+                startBackgroundFullScan(sourceConfigs, shuffleEnabled)
 
-                Result.success(finalPhotos.size)
+                Result.success(initialPhotos.size)
             } catch (e: Exception) {
                 _isLoading.value = false
                 _error.value = "Failed to load photos: ${e.message}"
@@ -330,9 +332,10 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
      */
     private suspend fun scanSourcesInParallel(
         sourceConfigs: List<PhotoSourceConfig>,
-        saveToDatabase: Boolean = false
+        saveToDatabase: Boolean = false,
+        maxPhotos: Int? = null
     ): List<Photo> = coroutineScope {
-        Log.d(TAG, "scanSourcesInParallel: Scanning ${sourceConfigs.size} source(s) in parallel (saveToDb=$saveToDatabase)...")
+        Log.d(TAG, "scanSourcesInParallel: Scanning ${sourceConfigs.size} source(s) in parallel (saveToDb=$saveToDatabase, maxPhotos=$maxPhotos)")
 
         // Create source instances and scan in parallel
         val scanResults = sourceConfigs.map { config ->
@@ -355,7 +358,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     Log.d(TAG, "scanSourcesInParallel: Source '${config.displayName}' created, starting scan...")
 
                     // Scan photos
-                    val scanResult = source.scanPhotos()
+                    val scanResult = source.scanPhotos(maxPhotos)
                     when (scanResult) {
                         is Result.Success -> {
                             val photos = scanResult.data
@@ -739,7 +742,87 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
         return mutableList
     }
 
+    /**
+     * Launches a full background scan after the quick scan started the slideshow.
+     * Scans all sources without limit, saves to DB, and merges new photos into the running slideshow.
+     */
+    private fun startBackgroundFullScan(
+        sourceConfigs: List<PhotoSourceConfig>,
+        shuffleEnabled: Boolean
+    ) {
+        backgroundScanJob?.cancel()
+
+        backgroundScanJob = scope.launch {
+            try {
+                Log.d(TAG, "Background full scan: Starting for ${sourceConfigs.size} source(s)")
+
+                val quickPaths = _photos.value.map { it.path }.toSet()
+
+                for (config in sourceConfigs) {
+                    try {
+                        val sourceResult = photoSourceFactory.createSource(config)
+                        if (sourceResult !is Result.Success) {
+                            Log.e(TAG, "Background full scan: Failed to create source '${config.displayName}'")
+                            continue
+                        }
+
+                        val source = sourceResult.data as PhotoSource
+                        Log.d(TAG, "Background full scan: Scanning source '${config.displayName}'...")
+
+                        val scanResult = source.scanPhotos()
+                        when (scanResult) {
+                            is Result.Success -> {
+                                val photos = scanResult.data
+                                Log.d(TAG, "Background full scan: Source '${config.displayName}' - ${photos.size} photos total")
+
+                                // Save all photos to database
+                                try {
+                                    val entities = photos.map { it.toEntity(config.id) }
+                                    photoDao.deletePhotosForSource(config.id)
+                                    photoDao.insertPhotos(entities)
+                                    Log.d(TAG, "Background full scan: Saved ${entities.size} photos to DB for '${config.displayName}'")
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Background full scan: DB save failed for '${config.displayName}'", e)
+                                }
+
+                                // Find photos not already in the slideshow
+                                val newPhotos = photos.filter { it.path !in quickPaths }
+                                if (newPhotos.isNotEmpty()) {
+                                    Log.d(TAG, "Background full scan: Adding ${newPhotos.size} new photos to slideshow")
+                                    mutex.withLock {
+                                        val current = _photos.value.toMutableList()
+                                        if (shuffleEnabled) {
+                                            for (photo in newPhotos) {
+                                                val pos = Random.nextInt(current.size + 1)
+                                                current.add(pos, photo)
+                                            }
+                                        } else {
+                                            current.addAll(newPhotos)
+                                        }
+                                        _photos.value = current
+                                        Log.d(TAG, "Background full scan: Slideshow now has ${current.size} photos")
+                                    }
+                                }
+                            }
+                            is Result.Error -> {
+                                Log.e(TAG, "Background full scan: Source '${config.displayName}' failed: ${scanResult.message}")
+                            }
+                            is Result.Loading -> {}
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Background full scan: Exception for '${config.displayName}'", e)
+                    }
+                }
+
+                Log.d(TAG, "Background full scan: Complete. Total photos: ${_photos.value.size}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Background full scan: Exception", e)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "MultiSourcePhotoRepo"
+        private const val QUICK_SCAN_LIMIT = 200
     }
 }
