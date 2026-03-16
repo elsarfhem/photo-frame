@@ -157,6 +157,23 @@ fun SlideshowScreen(
                 LoadingContent()
             }
         }
+
+        // Settings button always accessible (except during ready state which has its own)
+        if (!state.isReady) {
+            IconButton(
+                onClick = onNavigateToSettings,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Settings",
+                    modifier = Modifier.size(48.dp),
+                    tint = Color.White.copy(alpha = 0.9f)
+                )
+            }
+        }
     }
 }
 
