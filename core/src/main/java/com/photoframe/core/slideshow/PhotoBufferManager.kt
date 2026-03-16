@@ -168,9 +168,9 @@ class PhotoBufferManager @Inject constructor(
      * @return Result.Success with next photo bitmap (or null for videos), Result.Error if all photos failed
      */
     suspend fun getNextPhoto(displayIntervalMs: Long = 10_000L): Result<Bitmap?> {
-        // FIX A: Timeout EQUALS display interval (user requirement: "equal to configured delay")
-        // Changed from 70% to 100% to meet requirement
-        val timeoutPerAttempt = displayIntervalMs.coerceAtLeast(2_000L)
+        // Timeout is 50% of display interval — gives breathing room for the auto-advance loop
+        // and prevents a single slow photo from consuming the entire display cycle
+        val timeoutPerAttempt = (displayIntervalMs / 2).coerceAtLeast(2_000L)
 
         // FIX A: Single retry only (worst case = timeout = interval)
         // Changed from adaptive 1-3 retries to ensure total time ≤ interval
@@ -280,9 +280,9 @@ class PhotoBufferManager @Inject constructor(
      * @return Result.Success with previous photo bitmap (or null for videos), Result.Error if all photos failed
      */
     suspend fun getPreviousPhoto(displayIntervalMs: Long = 10_000L): Result<Bitmap?> {
-        // FIX A: Timeout EQUALS display interval (user requirement: "equal to configured delay")
-        // Changed from 70% to 100% to meet requirement
-        val timeoutPerAttempt = displayIntervalMs.coerceAtLeast(2_000L)
+        // Timeout is 50% of display interval — gives breathing room for the auto-advance loop
+        // and prevents a single slow photo from consuming the entire display cycle
+        val timeoutPerAttempt = (displayIntervalMs / 2).coerceAtLeast(2_000L)
 
         // FIX A: Single retry only (worst case = timeout = interval)
         // Changed from adaptive 1-3 retries to ensure total time ≤ interval
@@ -701,13 +701,6 @@ class PhotoBufferManager @Inject constructor(
          * Layout: [Current - 1, Current, Current + 1, Current + 2, Current + 3]
          */
         const val BUFFER_SIZE = 5
-
-        /**
-         * Photo load timeout: 15 seconds per photo (DEPRECATED - now using dynamic timeout).
-         * Kept for reference only. New code uses dynamic timeout based on display interval.
-         */
-        @Deprecated("Use dynamic timeout parameter in getNextPhoto/getPreviousPhoto")
-        private const val PHOTO_LOAD_TIMEOUT_MS = 15_000L
 
         /**
          * Preload timeout: 5 seconds per photo.

@@ -259,6 +259,14 @@ class TelemetryLogger @Inject constructor() {
     }
 
     /**
+     * Logs an auto-advance loop error that was caught and recovered from.
+     */
+    fun logAutoAdvanceError(error: String) {
+        logEvent("auto_advance_error", "Auto-advance loop error: $error")
+        logBreadcrumb("Auto-advance: caught error, recovering: $error")
+    }
+
+    /**
      * Sets slideshow context keys for crash reports.
      *
      * @param currentPhotoIndex Current photo index

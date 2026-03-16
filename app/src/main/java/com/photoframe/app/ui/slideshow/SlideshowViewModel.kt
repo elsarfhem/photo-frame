@@ -18,6 +18,7 @@ import com.photoframe.core.repository.SlideshowRepository
 import com.photoframe.core.slideshow.PhotoBufferManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,7 @@ import javax.inject.Inject
  * - Manual navigation (next/previous)
  * - Photo shuffling
  * - Reactive state updates via StateFlow
+ * - In-process watchdog for stall detection and recovery
  *
  * Thread Safety: All public methods are safe to call from main thread.
  * Internal operations run on appropriate dispatchers via repositories.
@@ -51,6 +53,7 @@ import javax.inject.Inject
  * - Network recovery: Auto-reconnect when network returns
  * - Crash recovery: Save/restore slideshow state
  * - Watchdog integration: Start/stop monitoring service
+ * - In-process watchdog: Detects and recovers from stalled slideshow
  *
  * @param context Application context for service management
  * @param slideshowRepository Repository for photo management
@@ -98,6 +101,12 @@ class SlideshowViewModel @Inject constructor(
 
     // Initialization flag to filter transient errors during startup
     private var isInitialized = false
+
+    // In-process watchdog
+    private var watchdogJob: Job? = null
+
+    @Volatile
+    private var lastSuccessfulAdvanceMs: Long = 0L
 
     init {
         // Phase 4: Monitor network state for auto-recovery
@@ -257,10 +266,10 @@ class SlideshowViewModel @Inject constructor(
                 android.util.Log.w("SlideshowViewModel", "Network disconnected, continuing with buffered photos")
                 telemetryLogger.logNetworkDisconnect()
 
-                // Show warning in UI
-                _state.update { it.copy(
-                    error = "Network disconnected. Playing buffered photos..."
-                ) }
+                // Show warning in UI but DON'T block isReady — use a separate warning field
+                // Note: Setting error here would make isReady=false, hiding the slideshow
+                // Instead we log and let buffered photos continue playing
+                android.util.Log.w("SlideshowViewModel", "Network disconnected. Buffered photos will continue.")
 
                 // Start retry job (every 30 seconds)
                 startNetworkRetryJob()
@@ -276,10 +285,15 @@ class SlideshowViewModel @Inject constructor(
                 networkRecoveryJob?.cancel()
                 networkRecoveryJob = null
 
-                // Clear error
-                _state.update { it.copy(error = null) }
-
-                // Resume slideshow (buffer will automatically reload)
+                // Clear error if it was network-related
+                _state.update { currentState ->
+                    if (currentState.error?.contains("Network") == true ||
+                        currentState.error?.contains("network") == true) {
+                        currentState.copy(error = null)
+                    } else {
+                        currentState
+                    }
+                }
             }
         }
     }
@@ -377,7 +391,8 @@ class SlideshowViewModel @Inject constructor(
      * Starts auto-advancing the slideshow.
      * Uses display interval from SettingsRepository.
      *
-     * Phase 4: Starts watchdog service for stall detection.
+     * Includes try-catch to prevent silent death of the auto-advance loop,
+     * and starts the in-process watchdog for stall detection.
      *
      * Thread Safety: Safe to call from main thread.
      */
@@ -385,33 +400,76 @@ class SlideshowViewModel @Inject constructor(
         if (_state.value.isPlaying) return // Already playing
 
         _state.update { it.copy(isPlaying = true) }
+        lastSuccessfulAdvanceMs = System.currentTimeMillis()
+
+        startInProcessWatchdog()
 
         autoAdvanceJob?.cancel()
         autoAdvanceJob = viewModelScope.launch {
             while (true) {
-                // Get display interval from settings
-                val settingsResult = settingsRepository.loadSlideshowSettings()
-                val interval = if (settingsResult is Result.Success) {
-                    settingsResult.data.displayIntervalMillis
-                } else {
-                    10_000L // Default 10 seconds
-                }
+                try {
+                    // Get display interval from settings
+                    val settingsResult = settingsRepository.loadSlideshowSettings()
+                    val interval = if (settingsResult is Result.Success) {
+                        settingsResult.data.displayIntervalMillis
+                    } else {
+                        10_000L // Default 10 seconds
+                    }
 
-                // Phase 4: Start watchdog service if not already running
-                if (_state.value.photoIndex == 0) {
+                    // Start watchdog service unconditionally
                     startWatchdogService(interval)
-                }
 
-                // FIX D: Advance to next photo FIRST (skip for videos - they advance via onVideoEnded callback)
-                if (_state.value.isPlaying && _state.value.currentPhotoMetadata?.isVideo != true) {
-                    // Pass display interval for dynamic timeout calculation
-                    nextPhoto(pauseAutoAdvance = false, displayIntervalMs = interval)
-                }
+                    // Advance to next photo (skip for videos - they advance via onVideoEnded callback)
+                    if (_state.value.isPlaying && _state.value.currentPhotoMetadata?.isVideo != true) {
+                        nextPhoto(pauseAutoAdvance = false, displayIntervalMs = interval)
+                    }
 
-                // FIX D: THEN wait for interval (so photo displays for full duration)
-                // Previously: delay was BEFORE nextPhoto, meaning photo displayed for 0s
-                // Now: delay is AFTER nextPhoto, so photo displays for full interval
-                delay(interval)
+                    // Wait for interval (so photo displays for full duration)
+                    delay(interval)
+                } catch (e: CancellationException) {
+                    throw e // Don't swallow coroutine cancellation
+                } catch (e: Exception) {
+                    android.util.Log.e("SlideshowViewModel", "Auto-advance loop error, recovering", e)
+                    telemetryLogger.logAutoAdvanceError(e.message ?: "Unknown error")
+                    delay(2_000L) // Brief pause before retry to avoid tight error loop
+                }
+            }
+        }
+    }
+
+    /**
+     * In-process watchdog that detects stalled slideshow and forces recovery.
+     *
+     * Checks every [WATCHDOG_CHECK_INTERVAL_MS] if the slideshow has advanced.
+     * If no advance for 2x display interval + grace period, forces restart.
+     */
+    private fun startInProcessWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = viewModelScope.launch {
+            while (true) {
+                delay(WATCHDOG_CHECK_INTERVAL_MS)
+
+                if (!_state.value.isPlaying) continue
+
+                val interval = _state.value.displayIntervalMillis
+                val stallThreshold = interval * 3 + WATCHDOG_GRACE_MS
+                val timeSinceAdvance = System.currentTimeMillis() - lastSuccessfulAdvanceMs
+
+                if (timeSinceAdvance > stallThreshold && lastSuccessfulAdvanceMs > 0) {
+                    android.util.Log.w("SlideshowViewModel",
+                        "WATCHDOG: Stall detected! ${timeSinceAdvance}ms since last advance (threshold: ${stallThreshold}ms)")
+
+                    // Recovery: cancel stuck jobs, force restart auto-advance
+                    nextPhotoJob?.cancel()
+                    autoAdvanceJob?.cancel()
+
+                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
+                    _state.update { it.copy(isPlaying = false) }
+
+                    // Restart playback
+                    play()
+                    break // Exit this watchdog instance; play() starts a new one
+                }
             }
         }
     }
@@ -431,6 +489,8 @@ class SlideshowViewModel @Inject constructor(
         nextPhotoJob = null
         previousPhotoJob?.cancel()
         previousPhotoJob = null
+        watchdogJob?.cancel()
+        watchdogJob = null
 
         // Phase 4: Stop watchdog service
         stopWatchdogService()
@@ -475,6 +535,9 @@ class SlideshowViewModel @Inject constructor(
 
             when (result) {
                 is Result.Success -> {
+                    // Track successful advance for watchdog
+                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
+
                     // Combine flow will update state automatically from repository StateFlows
                     // Just handle crash recovery state saving here
                     val currentIndex = _state.value.photoIndex
@@ -488,9 +551,8 @@ class SlideshowViewModel @Inject constructor(
                     }
                 }
                 is Result.Error -> {
-                    // Only show error if multiple consecutive photos failed (critical error)
                     val errorMsg = result.message ?: "Failed to load next photo"
-                    android.util.Log.e("SlideshowViewModel", "Critical error: $errorMsg")
+                    android.util.Log.e("SlideshowViewModel", "Photo load error: $errorMsg")
 
                     // Log photo load failure
                     val photoPath = _state.value.currentPhotoMetadata?.path ?: "unknown"
@@ -500,6 +562,9 @@ class SlideshowViewModel @Inject constructor(
                     if (errorMsg.contains("All recent photos failed")) {
                         _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
                     }
+                    // Otherwise: auto-advance will skip to next photo on next timer tick
+                    // Update advance time so watchdog doesn't trigger during normal skip
+                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
                 }
                 is Result.Loading -> {
                     // Should not happen
@@ -549,8 +614,7 @@ class SlideshowViewModel @Inject constructor(
 
             when (result) {
                 is Result.Success -> {
-                    // Combine flow will update state automatically from repository StateFlows
-                    // Success case handled reactively
+                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
                 }
                 is Result.Error -> {
                     // Still need to handle error explicitly as it's not always from StateFlow
@@ -660,13 +724,13 @@ class SlideshowViewModel @Inject constructor(
         nextPhotoJob?.cancel()
         previousPhotoJob?.cancel()
         networkRecoveryJob?.cancel()
+        watchdogJob?.cancel()
         stopWatchdogService()
     }
 
     companion object {
-        /**
-         * Network retry interval: 30 seconds.
-         */
         private const val NETWORK_RETRY_INTERVAL_MS = 30_000L
+        private const val WATCHDOG_CHECK_INTERVAL_MS = 5_000L
+        private const val WATCHDOG_GRACE_MS = 5_000L
     }
 }

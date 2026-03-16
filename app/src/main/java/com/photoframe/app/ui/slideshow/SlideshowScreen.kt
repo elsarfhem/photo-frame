@@ -79,15 +79,11 @@ import kotlin.math.abs
  * Architecture: Observes SlideshowViewModel state via StateFlow.
  *
  * @param viewModel Slideshow view model (injected via Hilt)
- * @param shuffleEnabled DEPRECATED: No longer used. Shuffle is controlled by saved settings.
- * @param autoPlay DEPRECATED: No longer used. Auto-play always enabled via ViewModel init.
  * @param onNavigateToSettings Callback to navigate to settings screen
  */
 @Composable
 fun SlideshowScreen(
     viewModel: SlideshowViewModel = hiltViewModel(),
-    @Suppress("UNUSED_PARAMETER") shuffleEnabled: Boolean = false,
-    @Suppress("UNUSED_PARAMETER") autoPlay: Boolean = true,
     onNavigateToSettings: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -159,6 +155,23 @@ fun SlideshowScreen(
             // Defensive fallback for unexpected state gaps
             else -> {
                 LoadingContent()
+            }
+        }
+
+        // Settings button always accessible (except during ready state which has its own)
+        if (!state.isReady) {
+            IconButton(
+                onClick = onNavigateToSettings,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Settings",
+                    modifier = Modifier.size(48.dp),
+                    tint = Color.White.copy(alpha = 0.9f)
+                )
             }
         }
     }

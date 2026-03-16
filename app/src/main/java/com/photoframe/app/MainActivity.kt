@@ -103,8 +103,6 @@ fun PhotoFrameApp(
             }
             is Screen.Slideshow -> {
                 SlideshowScreen(
-                    shuffleEnabled = true,
-                    autoPlay = true,
                     onNavigateToSettings = {
                         currentScreen = Screen.Settings
                     }
