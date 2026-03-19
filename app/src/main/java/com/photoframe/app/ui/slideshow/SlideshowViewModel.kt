@@ -173,8 +173,9 @@ class SlideshowViewModel @Inject constructor(
 
                 // Initialize slideshow with settings-based shuffle and auto-play
                 // This eliminates the timing gap where LaunchedEffect would be used
-                initialize(shuffleEnabled = settings.shuffleEnabled, autoPlay = true)
+                // FIX 5: Set isInitialized BEFORE initialize() suspends to prevent race window
                 isInitialized = true
+                initialize(shuffleEnabled = settings.shuffleEnabled, autoPlay = true)
             }
         }
 
@@ -617,10 +618,20 @@ class SlideshowViewModel @Inject constructor(
                     lastSuccessfulAdvanceMs = System.currentTimeMillis()
                 }
                 is Result.Error -> {
-                    // Still need to handle error explicitly as it's not always from StateFlow
-                    _state.update { it.copy(
-                        error = result.message ?: "Failed to load previous photo"
-                    ) }
+                    val errorMsg = result.message ?: "Failed to load previous photo"
+                    android.util.Log.e("SlideshowViewModel", "Photo load error: $errorMsg")
+
+                    // Log photo load failure
+                    val photoPath = _state.value.currentPhotoMetadata?.path ?: "unknown"
+                    telemetryLogger.logPhotoLoadFailed(photoPath, errorMsg)
+
+                    // Only show error in UI if it's a critical failure (10+ consecutive failures)
+                    if (errorMsg.contains("All recent photos failed")) {
+                        _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
+                    }
+                    // Otherwise: auto-advance will skip to next photo on next timer tick
+                    // Update advance time so watchdog doesn't trigger during normal skip
+                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
                 }
                 is Result.Loading -> {
                     // Should not happen

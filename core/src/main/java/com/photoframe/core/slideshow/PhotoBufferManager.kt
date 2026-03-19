@@ -8,6 +8,8 @@ import com.photoframe.core.model.Result
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +59,9 @@ class PhotoBufferManager @Inject constructor(
 
     // Pre-loading jobs
     private val preloadJobs = mutableMapOf<String, Job>()
+
+    // Managed coroutine scope for background jobs (FIX 2: prevents orphaned coroutines)
+    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     /**
      * Initializes the buffer with a list of photos.
@@ -408,7 +413,7 @@ class PhotoBufferManager @Inject constructor(
             }
 
             // Start new preload job
-            val job = CoroutineScope(ioDispatcher).launch {
+            val job = scope.launch {
                 // PRELOAD FIX: Use dynamic timeout instead of fixed 5s
                 val result = try {
                     withTimeout(preloadTimeout) {
@@ -478,7 +483,7 @@ class PhotoBufferManager @Inject constructor(
             }
 
             // Start new preload job
-            val job = CoroutineScope(ioDispatcher).launch {
+            val job = scope.launch {
                 // PRELOAD FIX: Use dynamic timeout instead of fixed 5s
                 val result = try {
                     withTimeout(preloadTimeout) {
@@ -563,7 +568,7 @@ class PhotoBufferManager @Inject constructor(
         }
 
         // Pre-load next 2 photos in background (async, non-blocking)
-        val job = CoroutineScope(ioDispatcher).launch {
+        val job = scope.launch {
             for (i in 1..2) {
                 val nextIndex = (currentIndex + i) % photos.size
                 val photo = photos[nextIndex]
@@ -658,6 +663,9 @@ class PhotoBufferManager @Inject constructor(
             currentIndex = -1
             _loadingState.value = BufferLoadingState.Idle
         }
+
+        // FIX 2: Cancel managed scope to ensure all background coroutines are terminated
+        scope.cancel()
     }
 
     /**
