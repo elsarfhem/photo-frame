@@ -411,27 +411,60 @@ class SlideshowViewModel @Inject constructor(
 
         autoAdvanceJob?.cancel()
         autoAdvanceJob = viewModelScope.launch {
+            // Advance immediately on first iteration so play() feels responsive
+            var isFirstIteration = true
             while (true) {
                 try {
-                    // Read display interval from state (kept in sync by settings observer)
                     val interval = _state.value.displayIntervalMillis
 
-                    // Start watchdog service unconditionally
-                    startWatchdogService(interval)
-
-                    // Advance to next photo (skip for videos - they advance via onVideoEnded callback)
-                    if (_state.value.isPlaying && _state.value.currentPhotoMetadata?.isVideo != true) {
-                        nextPhoto(pauseAutoAdvance = false, displayIntervalMs = interval)
+                    if (isFirstIteration) {
+                        isFirstIteration = false
+                    } else {
+                        delay(interval)
                     }
 
-                    // Wait for interval (so photo displays for full duration)
-                    delay(interval)
+                    startWatchdogService(interval)
+
+                    // Skip advance for videos (they advance via onVideoEnded callback)
+                    if (!_state.value.isPlaying) continue
+                    if (_state.value.currentPhotoMetadata?.isVideo == true) continue
+
+                    // Load next photo SYNCHRONOUSLY — prevents job pile-up.
+                    // Previous pattern: fire-and-forget nextPhoto() caused concurrent
+                    // loads that exhausted dispatcher threads on slow networks.
+                    val result = slideshowRepository.nextPhoto(interval)
+                    when (result) {
+                        is Result.Success -> {
+                            lastSuccessfulAdvanceMs = System.currentTimeMillis()
+                            val currentIndex = _state.value.photoIndex
+                            if (currentIndex != lastSavedPhotoIndex) {
+                                crashHandler.saveSlideshowState(
+                                    photoIndex = currentIndex,
+                                    totalPhotos = _state.value.totalPhotos,
+                                    isPlaying = true
+                                )
+                                lastSavedPhotoIndex = currentIndex
+                            }
+                        }
+                        is Result.Error -> {
+                            // Update timestamp even on error — the loop IS advancing, just
+                            // hitting bad files. Prevents false watchdog stall detection.
+                            lastSuccessfulAdvanceMs = System.currentTimeMillis()
+                            android.util.Log.e("SlideshowViewModel", "Auto-advance photo load error: ${result.message}")
+                            telemetryLogger.logPhotoLoadFailed(
+                                _state.value.currentPhotoMetadata?.path ?: "unknown",
+                                result.message ?: "Failed to load next photo"
+                            )
+                            // Continue loop — will try next photo on next iteration
+                        }
+                        is Result.Loading -> { /* Should not happen */ }
+                    }
                 } catch (e: CancellationException) {
-                    throw e // Don't swallow coroutine cancellation
+                    throw e
                 } catch (e: Exception) {
                     android.util.Log.e("SlideshowViewModel", "Auto-advance loop error, recovering", e)
                     telemetryLogger.logAutoAdvanceError(e.message ?: "Unknown error")
-                    delay(2_000L) // Brief pause before retry to avoid tight error loop
+                    delay(2_000L)
                 }
             }
         }
@@ -452,7 +485,7 @@ class SlideshowViewModel @Inject constructor(
                 if (!_state.value.isPlaying) continue
 
                 val interval = _state.value.displayIntervalMillis
-                val stallThreshold = interval * 3 + WATCHDOG_GRACE_MS
+                val stallThreshold = interval * 2 + WATCHDOG_GRACE_MS
                 val timeSinceAdvance = System.currentTimeMillis() - lastSuccessfulAdvanceMs
 
                 if (timeSinceAdvance > stallThreshold && lastSuccessfulAdvanceMs > 0) {

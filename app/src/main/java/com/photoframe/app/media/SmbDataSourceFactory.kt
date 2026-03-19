@@ -9,6 +9,7 @@ import com.photoframe.core.model.Result
 import com.photoframe.core.smb.SmbClient
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,15 +77,18 @@ private class SmbDataSource(
 
         Log.d(TAG, "open: Opening SMB video: $path")
 
-        // Ensure SMB client is connected before reading
-        // Note: ExoPlayer calls open() on background thread, so blocking is acceptable
         val result = runBlocking(ioDispatcher) {
-            // Check if connected, if not the connection should already be established
-            // by the repository during initialization
-            if (!smbClient.isConnected()) {
-                Log.w(TAG, "open: SmbClient not connected - connection should be established by repository")
+            try {
+                withTimeout(OPEN_TIMEOUT_MS) {
+                    if (!smbClient.isConnected()) {
+                        Log.w(TAG, "open: SmbClient not connected")
+                    }
+                    smbClient.readFile(path)
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                Log.w(TAG, "open: Timeout reading SMB video after ${OPEN_TIMEOUT_MS}ms")
+                Result.error(e, "SMB video read timed out")
             }
-            smbClient.readFile(path)
         }
 
         when (result) {
@@ -97,11 +101,10 @@ private class SmbDataSource(
                 return bytesRemaining
             }
             is Result.Error -> {
-                Log.e(TAG, "open: Failed to read SMB video: ${result.message}", result.exception)
+                Log.e(TAG, "open: Failed to read SMB video: ${result.message}")
                 throw java.io.IOException("Failed to read SMB video: ${result.message}", result.exception)
             }
             is Result.Loading -> {
-                Log.e(TAG, "open: Unexpected loading state from SMB client")
                 throw java.io.IOException("Unexpected result state from SMB client")
             }
         }
@@ -134,5 +137,7 @@ private class SmbDataSource(
 
     companion object {
         private const val TAG = "SmbDataSource"
+        /** Max time for open() to read the entire video file from SMB. */
+        private const val OPEN_TIMEOUT_MS = 10_000L
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.ViewModel
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -25,6 +26,8 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
 import com.photoframe.app.media.SmbDataSourceFactory
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -144,8 +147,16 @@ private fun createExoPlayer(
         DefaultDataSource.Factory(context)
     }
 
+    // No-retry policy: fail immediately instead of retrying 10x on SMB errors
+    val noRetryPolicy = object : DefaultLoadErrorHandlingPolicy() {
+        override fun getMinimumLoadableRetryCount(dataType: Int): Int = 0
+        override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
+            C.TIME_UNSET // Don't retry
+    }
+
     // Create media source
     val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+        .setLoadErrorHandlingPolicy(noRetryPolicy)
         .createMediaSource(MediaItem.fromUri(Uri.parse(videoPath)))
 
     // Create ExoPlayer
@@ -194,4 +205,4 @@ private fun createExoPlayer(
 }
 
 private const val TAG = "VideoPlayer"
-private const val VIDEO_BUFFER_TIMEOUT_MS = 30_000L
+private const val VIDEO_BUFFER_TIMEOUT_MS = 15_000L

@@ -389,8 +389,8 @@ private fun MediaContent(
                         } else {
                             viewModel.nextPhoto(pauseAutoAdvance = false)
                         }
-                    } else if (!hasDragged) {
-                        // No significant drag - handle as tap
+                    } else {
+                        // Tap (or small drag below swipe threshold) - handle as tap
                         // Always act immediately AND show overlay as visual feedback
                         val screenWidth = size.width
                         val tapX = downPosition.x

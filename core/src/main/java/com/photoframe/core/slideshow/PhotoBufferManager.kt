@@ -59,6 +59,11 @@ class PhotoBufferManager @Inject constructor(
     // Buffer state: Map of photo path to loaded bitmap
     private val buffer = LinkedHashMap<String, Bitmap>(bufferSize, 0.75f, true)
 
+    // Blacklist: paths that repeatedly fail to load (timeout, decode error, etc.)
+    // Skipped instantly on future attempts — prevents the same bad file from consuming timeout budget.
+    // Cleared on clear() and syncPhotoList() (fresh photo list = fresh start).
+    private val blacklistedPaths = mutableSetOf<String>()
+
     // Current photo list and index
     private var photos: List<Photo> = emptyList()
     private var currentIndex: Int = -1
@@ -346,19 +351,19 @@ class PhotoBufferManager @Inject constructor(
         // and prevents a single slow photo from consuming the entire display cycle
         val timeoutPerAttempt = (displayIntervalMs / 2).coerceAtLeast(2_000L)
 
-        // FIX A: Single retry only (worst case = timeout = interval)
-        // Changed from adaptive 1-3 retries to ensure total time ≤ interval
-        val maxRetries = 1
-
+        // maxRetries counts only real I/O failures (timeout, decode error).
+        // Blacklisted skips are free (instant) and don't count — but totalSkips
+        // caps at photos.size to prevent infinite loops if everything is blacklisted.
+        val maxRetries = 3
         var retriesSoFar = 0
+        var totalSkips = 0
+        val maxSkips = mutex.withLock { photos.size }
 
-        while (retriesSoFar < maxRetries) {
+        while (retriesSoFar < maxRetries && totalSkips < maxSkips) {
             try {
-                // STEP 1: Acquire mutex, read state, release mutex
-                val photoToLoad: Photo
-                val isInBuffer: Boolean
-
-                mutex.withLock {
+                // STEP 1: Acquire mutex, advance index, decide action
+                var photoToLoad: Photo? = null
+                val earlyResult = mutex.withLock {
                     if (photos.isEmpty()) {
                         return Result.error(
                             IllegalStateException("Buffer not initialized"),
@@ -368,36 +373,52 @@ class PhotoBufferManager @Inject constructor(
 
                     // Advance to next index (wrap around)
                     currentIndex = (currentIndex + 1) % photos.size
-                    photoToLoad = photos[currentIndex]
-                    isInBuffer = buffer.containsKey(photoToLoad.path)
+                    val photo = photos[currentIndex]
+
+                    // Skip blacklisted paths instantly (no timeout wasted)
+                    if (blacklistedPaths.contains(photo.path)) {
+                        Log.d(TAG, "getNextPhoto: Skipping blacklisted ${photo.fileName}")
+                        return@withLock null // signal: skip to next iteration
+                    }
 
                     // Handle videos immediately
-                    if (photoToLoad.isVideo) {
-                        Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
+                    if (photo.isVideo) {
+                        Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photo.fileName}")
                         preloadNext(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(null)
                     }
 
                     // If in buffer, return it
-                    if (isInBuffer) {
-                        val bitmap = buffer[photoToLoad.path]
+                    if (buffer.containsKey(photo.path)) {
+                        val bitmap = buffer[photo.path]
                         preloadNext(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(bitmap)
                     }
 
-                    // Mark as loading before releasing mutex
+                    // Needs loading
                     _loadingState.value = BufferLoadingState.Loading
+                    photoToLoad = photo
+                    photo // non-null = proceed to load
                 }
+
+                // Blacklisted skip — free, doesn't count as retry
+                if (earlyResult == null) {
+                    totalSkips++
+                    continue
+                }
+
+                val photo = photoToLoad!!
 
                 // STEP 2: Load photo WITHOUT holding mutex (with dynamic timeout)
                 val loadResult = try {
                     withTimeout(timeoutPerAttempt) {
-                        imageCache.load(photoToLoad.path)
+                        imageCache.load(photo.path)
                     }
                 } catch (e: TimeoutCancellationException) {
-                    Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying next")
+                    Log.w(TAG, "Timeout loading ${photo.fileName} after ${timeoutPerAttempt}ms, blacklisting")
+                    blacklistPath(photo.path)
                     retriesSoFar++
                     continue
                 }
@@ -406,18 +427,19 @@ class PhotoBufferManager @Inject constructor(
                 when (loadResult) {
                     is Result.Success -> {
                         mutex.withLock {
-                            addToBuffer(photoToLoad.path, loadResult.data)
+                            addToBuffer(photo.path, loadResult.data)
                             preloadNext(displayIntervalMs)
                             _loadingState.value = BufferLoadingState.Ready
                         }
                         return Result.success(loadResult.data)
                     }
                     is Result.Error -> {
-                        Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying next photo: ${loadResult.message}")
+                        Log.w(TAG, "Failed to load ${photo.fileName}, blacklisting: ${loadResult.message}")
+                        blacklistPath(photo.path)
                         retriesSoFar++
                     }
                     is Result.Loading -> {
-                        Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying next")
+                        Log.w(TAG, "Unexpected loading state for ${photo.fileName}, trying next")
                         retriesSoFar++
                     }
                 }
@@ -461,19 +483,18 @@ class PhotoBufferManager @Inject constructor(
         // and prevents a single slow photo from consuming the entire display cycle
         val timeoutPerAttempt = (displayIntervalMs / 2).coerceAtLeast(2_000L)
 
-        // FIX A: Single retry only (worst case = timeout = interval)
-        // Changed from adaptive 1-3 retries to ensure total time ≤ interval
-        val maxRetries = 1
-
+        // maxRetries counts only real I/O failures (timeout, decode error).
+        // Blacklisted skips are free (instant) and don't count.
+        val maxRetries = 3
         var retriesSoFar = 0
+        var totalSkips = 0
+        val maxSkips = mutex.withLock { photos.size }
 
-        while (retriesSoFar < maxRetries) {
+        while (retriesSoFar < maxRetries && totalSkips < maxSkips) {
             try {
-                // STEP 1: Acquire mutex, read state, release mutex
-                val photoToLoad: Photo
-                val isInBuffer: Boolean
-
-                mutex.withLock {
+                // STEP 1: Acquire mutex, advance index backward, decide action
+                var photoToLoad: Photo? = null
+                val earlyResult = mutex.withLock {
                     if (photos.isEmpty()) {
                         return Result.error(
                             IllegalStateException("Buffer not initialized"),
@@ -483,36 +504,52 @@ class PhotoBufferManager @Inject constructor(
 
                     // Go back to previous index (wrap around)
                     currentIndex = if (currentIndex == 0) photos.size - 1 else currentIndex - 1
-                    photoToLoad = photos[currentIndex]
-                    isInBuffer = buffer.containsKey(photoToLoad.path)
+                    val photo = photos[currentIndex]
+
+                    // Skip blacklisted paths instantly (no timeout wasted)
+                    if (blacklistedPaths.contains(photo.path)) {
+                        Log.d(TAG, "getPreviousPhoto: Skipping blacklisted ${photo.fileName}")
+                        return@withLock null // signal: skip to next iteration
+                    }
 
                     // Handle videos immediately
-                    if (photoToLoad.isVideo) {
-                        Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
+                    if (photo.isVideo) {
+                        Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${photo.fileName}")
                         preloadPrevious(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(null)
                     }
 
                     // If in buffer, return it
-                    if (isInBuffer) {
-                        val bitmap = buffer[photoToLoad.path]
+                    if (buffer.containsKey(photo.path)) {
+                        val bitmap = buffer[photo.path]
                         preloadPrevious(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(bitmap)
                     }
 
-                    // Mark as loading before releasing mutex
+                    // Needs loading
                     _loadingState.value = BufferLoadingState.Loading
+                    photoToLoad = photo
+                    photo // non-null = proceed to load
                 }
+
+                // Blacklisted skip — free, doesn't count as retry
+                if (earlyResult == null) {
+                    totalSkips++
+                    continue
+                }
+
+                val photo = photoToLoad!!
 
                 // STEP 2: Load photo WITHOUT holding mutex (with dynamic timeout)
                 val loadResult = try {
                     withTimeout(timeoutPerAttempt) {
-                        imageCache.load(photoToLoad.path)
+                        imageCache.load(photo.path)
                     }
                 } catch (e: TimeoutCancellationException) {
-                    Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying previous")
+                    Log.w(TAG, "Timeout loading ${photo.fileName} after ${timeoutPerAttempt}ms, blacklisting")
+                    blacklistPath(photo.path)
                     retriesSoFar++
                     continue
                 }
@@ -521,18 +558,19 @@ class PhotoBufferManager @Inject constructor(
                 when (loadResult) {
                     is Result.Success -> {
                         mutex.withLock {
-                            addToBuffer(photoToLoad.path, loadResult.data)
+                            addToBuffer(photo.path, loadResult.data)
                             preloadPrevious(displayIntervalMs)
                             _loadingState.value = BufferLoadingState.Ready
                         }
                         return Result.success(loadResult.data)
                     }
                     is Result.Error -> {
-                        Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying previous photo: ${loadResult.message}")
+                        Log.w(TAG, "Failed to load ${photo.fileName}, blacklisting: ${loadResult.message}")
+                        blacklistPath(photo.path)
                         retriesSoFar++
                     }
                     is Result.Loading -> {
-                        Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying previous")
+                        Log.w(TAG, "Unexpected loading state for ${photo.fileName}, trying previous")
                         retriesSoFar++
                     }
                 }
@@ -582,6 +620,9 @@ class PhotoBufferManager @Inject constructor(
                 continue
             }
 
+            // Skip blacklisted paths — don't waste preload timeout on known-bad files
+            if (blacklistedPaths.contains(photoToPreload.path)) continue
+
             // Only preload if not already in buffer or being loaded
             if (buffer.containsKey(photoToPreload.path) || preloadJobs.containsKey(photoToPreload.path)) {
                 continue
@@ -595,7 +636,8 @@ class PhotoBufferManager @Inject constructor(
                         imageCache.load(photoToPreload.path)
                     }
                 } catch (e: TimeoutCancellationException) {
-                    Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
+                    Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms, blacklisting")
+                    blacklistPath(photoToPreload.path)
                     mutex.withLock {
                         preloadJobs.remove(photoToPreload.path)
                     }
@@ -611,8 +653,8 @@ class PhotoBufferManager @Inject constructor(
                         Log.d(TAG, "Preloaded photo +$i ahead: ${photoToPreload.fileName}")
                     }
                     is Result.Error -> {
-                        // Log error but don't fail (will load on-demand or skip later)
-                        Log.w(TAG, "Failed to preload ${photoToPreload.fileName}: ${result.message}")
+                        Log.w(TAG, "Failed to preload ${photoToPreload.fileName}, blacklisting: ${result.message}")
+                        blacklistPath(photoToPreload.path)
                         mutex.withLock {
                             preloadJobs.remove(photoToPreload.path)
                         }
@@ -652,6 +694,9 @@ class PhotoBufferManager @Inject constructor(
                 continue
             }
 
+            // Skip blacklisted paths — don't waste preload timeout on known-bad files
+            if (blacklistedPaths.contains(photoToPreload.path)) continue
+
             // Only preload if not already in buffer or being loaded
             if (buffer.containsKey(photoToPreload.path) || preloadJobs.containsKey(photoToPreload.path)) {
                 continue
@@ -665,7 +710,8 @@ class PhotoBufferManager @Inject constructor(
                         imageCache.load(photoToPreload.path)
                     }
                 } catch (e: TimeoutCancellationException) {
-                    Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
+                    Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms, blacklisting")
+                    blacklistPath(photoToPreload.path)
                     mutex.withLock {
                         preloadJobs.remove(photoToPreload.path)
                     }
@@ -681,8 +727,8 @@ class PhotoBufferManager @Inject constructor(
                         Log.d(TAG, "Preloaded photo -$i backward: ${photoToPreload.fileName}")
                     }
                     is Result.Error -> {
-                        // Log error but don't fail (will load on-demand or skip later)
-                        Log.w(TAG, "Failed to preload ${photoToPreload.fileName}: ${result.message}")
+                        Log.w(TAG, "Failed to preload ${photoToPreload.fileName}, blacklisting: ${result.message}")
+                        blacklistPath(photoToPreload.path)
                         mutex.withLock {
                             preloadJobs.remove(photoToPreload.path)
                         }
@@ -694,6 +740,23 @@ class PhotoBufferManager @Inject constructor(
             }
 
             preloadJobs[photoToPreload.path] = job
+        }
+    }
+
+    /**
+     * Blacklists a photo path so it's skipped instantly on future load attempts.
+     * Prevents the same problematic file from repeatedly consuming timeout budget.
+     * Thread-safe: uses synchronized access on the set.
+     */
+    private fun blacklistPath(path: String) {
+        synchronized(blacklistedPaths) {
+            // Cap blacklist size to prevent unbounded growth
+            if (blacklistedPaths.size >= MAX_BLACKLIST_SIZE) {
+                val oldest = blacklistedPaths.first()
+                blacklistedPaths.remove(oldest)
+            }
+            blacklistedPaths.add(path)
+            Log.d(TAG, "Blacklisted path (${blacklistedPaths.size} total): ${path.substringAfterLast('/')}")
         }
     }
 
@@ -745,6 +808,9 @@ class PhotoBufferManager @Inject constructor(
 
             // Clear all bitmaps (GC will free memory when references are released)
             buffer.clear()
+
+            // Clear blacklist — fresh start on re-initialization
+            blacklistedPaths.clear()
 
             // Reset state
             photos = emptyList()
@@ -803,6 +869,9 @@ class PhotoBufferManager @Inject constructor(
          * Fix #3: Prevents indefinite hangs during background preloading.
          */
         private const val PRELOAD_TIMEOUT_MS = 5_000L
+
+        /** Maximum blacklist size to prevent unbounded memory growth. */
+        private const val MAX_BLACKLIST_SIZE = 100
 
         private const val TAG = "PhotoBufferManager"
 

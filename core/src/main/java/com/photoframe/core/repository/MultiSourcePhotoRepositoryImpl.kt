@@ -653,11 +653,14 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                         allNewPhotos
                     }
 
-                    mutex.withLock {
-                        val mergedPhotos = _photos.value + newPhotosToAdd
-                        _photos.value = mergedPhotos
-                        Log.d(TAG, "Background sync: Updated photo list to ${mergedPhotos.size} photos")
+                    // Merge under mutex but emit OUTSIDE to prevent lock inversion.
+                    // StateFlow emission triggers PhotoBufferManager.syncPhotoList() which
+                    // acquires buffer mutex — emitting inside repo mutex creates deadlock risk.
+                    val mergedPhotos = mutex.withLock {
+                        _photos.value + newPhotosToAdd
                     }
+                    _photos.value = mergedPhotos
+                    Log.d(TAG, "Background sync: Updated photo list to ${mergedPhotos.size} photos")
                 } else {
                     Log.d(TAG, "Background sync: No new photos discovered")
                 }
@@ -796,7 +799,8 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                                 val newPhotos = photos.filter { it.path !in quickPaths }
                                 if (newPhotos.isNotEmpty()) {
                                     Log.d(TAG, "Background full scan: Adding ${newPhotos.size} new photos to slideshow")
-                                    mutex.withLock {
+                                    // Merge under mutex, emit outside to prevent lock inversion
+                                    val updatedList = mutex.withLock {
                                         val current = _photos.value.toMutableList()
                                         if (shuffleEnabled) {
                                             for (photo in newPhotos) {
@@ -806,9 +810,10 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                                         } else {
                                             current.addAll(newPhotos)
                                         }
-                                        _photos.value = current
-                                        Log.d(TAG, "Background full scan: Slideshow now has ${current.size} photos")
+                                        current.toList()
                                     }
+                                    _photos.value = updatedList
+                                    Log.d(TAG, "Background full scan: Slideshow now has ${updatedList.size} photos")
                                 }
                             }
                             is Result.Error -> {

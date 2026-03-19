@@ -125,9 +125,9 @@ class ImageCache @Inject constructor(
             .data(path)
             // Downsample to screen resolution (2560x1600)
             .size(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
-            // Disable hardware bitmaps to allow post-decode EXIF rotation if needed.
-            // Downsampled 2560x1600 images don't benefit significantly from hardware acceleration.
-            .allowHardware(false)
+            // Hardware bitmaps: stored in GPU memory, outside Java heap (reduces GC pressure).
+            // Safe because Coil applies EXIF rotation DURING decode (before bitmap creation).
+            .allowHardware(true)
             // Use ARGB_8888 for quality
             .bitmapConfig(Bitmap.Config.ARGB_8888)
             .build()
@@ -198,7 +198,7 @@ class ImageCache @Inject constructor(
             val request = ImageRequest.Builder(context)
                 .data(path)
                 .size(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
-                .allowHardware(false)
+                .allowHardware(true)
                 .bitmapConfig(Bitmap.Config.ARGB_8888)
                 .build()
 
