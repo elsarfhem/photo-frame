@@ -467,20 +467,24 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     }
 
     override suspend fun nextPhoto(displayIntervalMs: Long): Result<Bitmap?> = withContext(ioDispatcher) {
-        return@withContext mutex.withLock {
-            val currentPhotos = _photos.value
-            if (currentPhotos.isEmpty()) {
+        // Check precondition under mutex (fast)
+        mutex.withLock {
+            if (_photos.value.isEmpty()) {
                 return@withContext Result.error(
                     IllegalStateException("No photos loaded"),
                     "Load photos before navigating"
                 )
             }
+        }
 
-            val result = photoBufferManager.getNextPhoto(displayIntervalMs)
+        // Load photo WITHOUT holding repo mutex (slow I/O with timeout)
+        val result = photoBufferManager.getNextPhoto(displayIntervalMs)
+
+        // Update state under mutex (fast)
+        return@withContext mutex.withLock {
+            val currentPhotos = _photos.value
             when (result) {
                 is Result.Success -> {
-                    // Note: Don't increment index here - PhotoBufferManager already did it
-                    // Just sync our index with the buffer's index
                     currentIndex = photoBufferManager.getCurrentIndex()
                     _currentPhoto.value = result.data
                     _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
@@ -489,8 +493,6 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     Result.success(result.data)
                 }
                 is Result.Error -> {
-                    // Don't propagate internal buffer errors to UI via _error StateFlow
-                    // Return the error via Result.Error for proper handling by ViewModel
                     Result.error(result.exception, result.message ?: "Failed to load next photo")
                 }
                 is Result.Loading -> {
@@ -504,20 +506,24 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     }
 
     override suspend fun previousPhoto(displayIntervalMs: Long): Result<Bitmap?> = withContext(ioDispatcher) {
-        return@withContext mutex.withLock {
-            val currentPhotos = _photos.value
-            if (currentPhotos.isEmpty()) {
+        // Check precondition under mutex (fast)
+        mutex.withLock {
+            if (_photos.value.isEmpty()) {
                 return@withContext Result.error(
                     IllegalStateException("No photos loaded"),
                     "Load photos before navigating"
                 )
             }
+        }
 
-            val result = photoBufferManager.getPreviousPhoto(displayIntervalMs)
+        // Load photo WITHOUT holding repo mutex (slow I/O with timeout)
+        val result = photoBufferManager.getPreviousPhoto(displayIntervalMs)
+
+        // Update state under mutex (fast)
+        return@withContext mutex.withLock {
+            val currentPhotos = _photos.value
             when (result) {
                 is Result.Success -> {
-                    // Note: Don't decrement index here - PhotoBufferManager already did it
-                    // Just sync our index with the buffer's index
                     currentIndex = photoBufferManager.getCurrentIndex()
                     _currentPhoto.value = result.data
                     _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
@@ -526,8 +532,6 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     Result.success(result.data)
                 }
                 is Result.Error -> {
-                    // Don't propagate internal buffer errors to UI via _error StateFlow
-                    // Return the error via Result.Error for proper handling by ViewModel
                     Result.error(result.exception, result.message ?: "Failed to load previous photo")
                 }
                 is Result.Loading -> {

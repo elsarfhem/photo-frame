@@ -46,6 +46,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +89,13 @@ fun SlideshowScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // Hoist isPlaying as a Compose snapshot state for synchronous UI updates.
+    // StateFlow → collectAsState is async, so the overlay could show a stale icon
+    // when the gesture handler toggles play/pause and shows controls in the same frame.
+    var isPlayingLocal by remember { mutableStateOf(state.isPlaying) }
+    // Sync ViewModel → Compose state (for changes from auto-advance, watchdog, etc.)
+    LaunchedEffect(state.isPlaying) { isPlayingLocal = state.isPlaying }
 
     // Keep screen on during slideshow
     DisposableEffect(Unit) {
@@ -136,11 +144,15 @@ fun SlideshowScreen(
                     photoIndex = state.photoIndex,
                     totalPhotos = state.totalPhotos,
                     transitionType = state.transitionType,
-                    isPlaying = state.isPlaying,
+                    isPlaying = isPlayingLocal,
                     displayIntervalMillis = state.displayIntervalMillis,
                     panAnimationEnabled = state.panAnimationEnabled,
                     navigationDirection = state.navigationDirection,
                     viewModel = viewModel,
+                    onPlayPause = { playing ->
+                        isPlayingLocal = playing  // Immediate Compose snapshot update
+                        if (playing) viewModel.play() else viewModel.pause()
+                    },
                     onNavigateToSettings = onNavigateToSettings
                 )
 
@@ -323,11 +335,16 @@ private fun MediaContent(
     panAnimationEnabled: Boolean,
     navigationDirection: NavigationDirection,
     viewModel: SlideshowViewModel = hiltViewModel(),
+    onPlayPause: (Boolean) -> Unit = {},
     onNavigateToSettings: () -> Unit = {}
 ) {
     val view = LocalView.current
     var dragOffset by remember { mutableStateOf(0f) }
     var showControls by remember { mutableStateOf(false) }
+
+    // Keep updated references for values read inside pointerInput (which captures at composition time)
+    val currentIsPlaying by rememberUpdatedState(isPlaying)
+    val currentOnPlayPause by rememberUpdatedState(onPlayPause)
 
     // Get VideoPlayerViewModel for SmbDataSourceFactory injection
     val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
@@ -368,41 +385,32 @@ private fun MediaContent(
                         // Horizontal drag detected - handle as swipe
                         view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                         if (totalDrag > 0) {
-                            viewModel.previousPhoto(pauseAutoAdvance = true)
+                            viewModel.previousPhoto(pauseAutoAdvance = false)
                         } else {
-                            viewModel.nextPhoto(pauseAutoAdvance = true)
+                            viewModel.nextPhoto(pauseAutoAdvance = false)
                         }
                     } else if (!hasDragged) {
                         // No significant drag - handle as tap
-                        if (!showControls) {
-                            showControls = true
-                        } else {
-                            // Handle zone-based navigation
-                            val screenWidth = size.width
-                            val tapX = downPosition.x
+                        // Always act immediately AND show overlay as visual feedback
+                        val screenWidth = size.width
+                        val tapX = downPosition.x
 
-                            when {
-                                tapX < screenWidth / 3 -> {
-                                    view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
-                                    viewModel.previousPhoto(pauseAutoAdvance = true)
-                                    showControls = false
-                                }
-                                tapX > screenWidth * 2 / 3 -> {
-                                    view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
-                                    viewModel.nextPhoto(pauseAutoAdvance = true)
-                                    showControls = false
-                                }
-                                else -> {
-                                    view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
-                                    if (isPlaying) {
-                                        viewModel.pause()
-                                    } else {
-                                        viewModel.play()
-                                    }
-                                    showControls = false
-                                }
+                        when {
+                            tapX < screenWidth / 3 -> {
+                                view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+                                viewModel.previousPhoto(pauseAutoAdvance = false)
+                            }
+                            tapX > screenWidth * 2 / 3 -> {
+                                view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+                                viewModel.nextPhoto(pauseAutoAdvance = false)
+                            }
+                            else -> {
+                                view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+                                currentOnPlayPause(!currentIsPlaying)
                             }
                         }
+                        // Show overlay briefly for visual feedback
+                        showControls = true
                     }
                 }
             },

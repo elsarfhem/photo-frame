@@ -1,14 +1,17 @@
 package com.photoframe.core.slideshow
 
 import android.graphics.Bitmap
+import android.util.Log
 import com.photoframe.core.di.IoDispatcher
 import com.photoframe.core.image.ImageCache
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.Result
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,8 +50,14 @@ class PhotoBufferManager @Inject constructor(
 ) {
     private val mutex = Mutex()
 
+    // Dynamic buffer sizing based on device memory
+    // Each photo ≈ 16MB (2560x1600 ARGB_8888). Reserve 50% of heap for buffer.
+    private val bufferSize: Int = calculateBufferSize()
+    private val preloadAhead: Int = (bufferSize - 2).coerceAtLeast(2) // Reserve 1 for current, 1 for previous
+    private val preloadBehind: Int = (bufferSize / 5).coerceAtLeast(1)
+
     // Buffer state: Map of photo path to loaded bitmap
-    private val buffer = LinkedHashMap<String, Bitmap>(BUFFER_SIZE, 0.75f, true)
+    private val buffer = LinkedHashMap<String, Bitmap>(bufferSize, 0.75f, true)
 
     // Current photo list and index
     private var photos: List<Photo> = emptyList()
@@ -75,17 +84,20 @@ class PhotoBufferManager @Inject constructor(
      * @return Result.Success if initialized, Result.Error if failed
      */
     suspend fun initialize(photoList: List<Photo>, startIndex: Int = 0): Result<Unit> {
-        return mutex.withLock {
+        Log.d(TAG, "initialize: bufferSize=$bufferSize, preloadAhead=$preloadAhead, preloadBehind=$preloadBehind")
+        // STEP 1: Validate and set state under mutex (fast, no I/O)
+        val photoToLoad: Photo
+        mutex.withLock {
             try {
                 if (photoList.isEmpty()) {
-                    return@withLock Result.error(
+                    return Result.error(
                         IllegalArgumentException("Photo list cannot be empty"),
                         "Cannot initialize buffer with empty photo list"
                     )
                 }
 
                 if (startIndex !in photoList.indices) {
-                    return@withLock Result.error(
+                    return Result.error(
                         IndexOutOfBoundsException("Invalid start index: $startIndex"),
                         "Start index must be between 0 and ${photoList.size - 1}"
                     )
@@ -103,16 +115,103 @@ class PhotoBufferManager @Inject constructor(
                 currentIndex = startIndex
 
                 _loadingState.value = BufferLoadingState.Loading
-
-                // Pre-load initial buffer (Current, Current + 1, Current + 2)
-                preloadInitialBuffer()
-
-                Result.success(Unit)
+                photoToLoad = photos[currentIndex]
             } catch (e: Exception) {
                 _loadingState.value = BufferLoadingState.Error(e)
-                Result.error(e, "Failed to initialize buffer: ${e.message}")
+                return Result.error(e, "Failed to initialize buffer: ${e.message}")
             }
         }
+
+        // STEP 2: Load initial photo WITHOUT holding mutex (up to 5s I/O)
+        // Try up to 3 photos — skip slow/broken ones to avoid stuck init
+        val maxInitAttempts = 3.coerceAtMost(photoList.size)
+        var loaded = false
+
+        for (attempt in 0 until maxInitAttempts) {
+            val photo = mutex.withLock { photos[currentIndex] }
+
+            if (photo.isVideo) {
+                Log.d(TAG, "initialize: Current item is video, skipping bitmap load: ${photo.fileName}")
+                mutex.withLock { _loadingState.value = BufferLoadingState.Ready }
+                loaded = true
+                break
+            }
+
+            val result = try {
+                withTimeout(PRELOAD_TIMEOUT_MS) { imageCache.load(photo.path) }
+            } catch (e: TimeoutCancellationException) {
+                Log.w(TAG, "initialize: Timeout loading ${photo.fileName}, trying next (attempt ${attempt + 1}/$maxInitAttempts)")
+                mutex.withLock { currentIndex = (currentIndex + 1) % photos.size }
+                continue
+            }
+
+            when (result) {
+                is Result.Success -> {
+                    mutex.withLock {
+                        addToBuffer(photo.path, result.data)
+                        _loadingState.value = BufferLoadingState.Ready
+                    }
+                    Log.d(TAG, "initialize: Current photo loaded: ${photo.fileName}")
+                    loaded = true
+                    break
+                }
+                is Result.Error -> {
+                    Log.w(TAG, "initialize: Failed to load ${photo.fileName}, trying next (attempt ${attempt + 1}/$maxInitAttempts)")
+                    mutex.withLock { currentIndex = (currentIndex + 1) % photos.size }
+                }
+                is Result.Loading -> { /* Should not happen */ }
+            }
+        }
+
+        if (!loaded) {
+            val e = IllegalStateException("Failed to load any of the first $maxInitAttempts photos")
+            mutex.withLock { _loadingState.value = BufferLoadingState.Error(e) }
+            return Result.error(e, "Could not load initial photo after $maxInitAttempts attempts")
+        }
+
+        // STEP 4: Preload next photos in background (non-blocking)
+        scope.launch {
+            for (i in 1..preloadAhead) {
+                val nextIndex: Int
+                val photo: Photo
+                mutex.withLock {
+                    nextIndex = (currentIndex + i) % photos.size
+                    photo = photos[nextIndex]
+                }
+
+                if (photo.isVideo) {
+                    Log.d(TAG, "initialize: Skipping video preload: ${photo.fileName}")
+                    continue
+                }
+
+                val alreadyBuffered = mutex.withLock { buffer.containsKey(photo.path) }
+                if (!alreadyBuffered) {
+                    val preloadResult = try {
+                        withTimeout(PRELOAD_TIMEOUT_MS) {
+                            imageCache.load(photo.path)
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        Log.w(TAG, "initialize: Timeout preloading ${photo.fileName}")
+                        continue
+                    }
+
+                    when (preloadResult) {
+                        is Result.Success -> {
+                            mutex.withLock {
+                                addToBuffer(photo.path, preloadResult.data)
+                            }
+                            Log.d(TAG, "initialize: Preloaded +$i ahead: ${photo.fileName}")
+                        }
+                        is Result.Error -> {
+                            Log.w(TAG, "initialize: Failed to preload ${photo.fileName}: ${preloadResult.message}")
+                        }
+                        is Result.Loading -> { /* Should not happen */ }
+                    }
+                }
+            }
+        }
+
+        return Result.success(Unit)
     }
 
     /**
@@ -148,7 +247,7 @@ class PhotoBufferManager @Inject constructor(
     suspend fun syncPhotoList(updatedPhotoList: List<Photo>) {
         mutex.withLock {
             if (updatedPhotoList.isEmpty()) {
-                android.util.Log.w(TAG, "syncPhotoList: Updated photo list is empty, keeping current")
+                Log.w(TAG, "syncPhotoList: Updated photo list is empty, keeping current")
                 return@withLock
             }
 
@@ -157,7 +256,7 @@ class PhotoBufferManager @Inject constructor(
                 return@withLock
             }
 
-            android.util.Log.d(TAG, "syncPhotoList: Syncing from ${photos.size} to ${updatedPhotoList.size} photos")
+            Log.d(TAG, "syncPhotoList: Syncing from ${photos.size} to ${updatedPhotoList.size} photos")
 
             // Check if current photo still exists in updated list
             val currentPhotoPath = photos.getOrNull(currentIndex)?.path
@@ -173,13 +272,13 @@ class PhotoBufferManager @Inject constructor(
             // Update index if current photo still exists, otherwise keep current index (clamped)
             if (newIndex >= 0) {
                 currentIndex = newIndex
-                android.util.Log.d(TAG, "syncPhotoList: Current photo still exists at index $newIndex")
+                Log.d(TAG, "syncPhotoList: Current photo still exists at index $newIndex")
             } else if (currentIndex >= photos.size) {
                 // Current index out of bounds - clamp to last photo
                 currentIndex = (photos.size - 1).coerceAtLeast(0)
-                android.util.Log.w(TAG, "syncPhotoList: Current index out of bounds, clamped to $currentIndex")
+                Log.w(TAG, "syncPhotoList: Current index out of bounds, clamped to $currentIndex")
             } else {
-                android.util.Log.d(TAG, "syncPhotoList: Kept current index $currentIndex (still valid)")
+                Log.d(TAG, "syncPhotoList: Kept current index $currentIndex (still valid)")
             }
         }
     }
@@ -274,7 +373,7 @@ class PhotoBufferManager @Inject constructor(
 
                     // Handle videos immediately
                     if (photoToLoad.isVideo) {
-                        android.util.Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
+                        Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
                         preloadNext(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(null)
@@ -297,8 +396,8 @@ class PhotoBufferManager @Inject constructor(
                     withTimeout(timeoutPerAttempt) {
                         imageCache.load(photoToLoad.path)
                     }
-                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying next")
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying next")
                     retriesSoFar++
                     continue
                 }
@@ -314,16 +413,19 @@ class PhotoBufferManager @Inject constructor(
                         return Result.success(loadResult.data)
                     }
                     is Result.Error -> {
-                        android.util.Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying next photo: ${loadResult.message}")
+                        Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying next photo: ${loadResult.message}")
                         retriesSoFar++
                     }
                     is Result.Loading -> {
-                        android.util.Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying next")
+                        Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying next")
                         retriesSoFar++
                     }
                 }
+            } catch (e: CancellationException) {
+                // Rethrow CancellationException — never swallow coroutine cancellation
+                throw e
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Exception getting next photo: ${e.message}, trying next")
+                Log.e(TAG, "Exception getting next photo: ${e.message}, trying next")
                 retriesSoFar++
             }
         }
@@ -386,7 +488,7 @@ class PhotoBufferManager @Inject constructor(
 
                     // Handle videos immediately
                     if (photoToLoad.isVideo) {
-                        android.util.Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
+                        Log.d(TAG, "getPreviousPhoto: Video detected, skipping bitmap load: ${photoToLoad.fileName}")
                         preloadPrevious(displayIntervalMs)
                         _loadingState.value = BufferLoadingState.Ready
                         return Result.success(null)
@@ -409,8 +511,8 @@ class PhotoBufferManager @Inject constructor(
                     withTimeout(timeoutPerAttempt) {
                         imageCache.load(photoToLoad.path)
                     }
-                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    android.util.Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying previous")
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(TAG, "Timeout loading ${photoToLoad.fileName} after ${timeoutPerAttempt}ms, trying previous")
                     retriesSoFar++
                     continue
                 }
@@ -426,16 +528,19 @@ class PhotoBufferManager @Inject constructor(
                         return Result.success(loadResult.data)
                     }
                     is Result.Error -> {
-                        android.util.Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying previous photo: ${loadResult.message}")
+                        Log.w(TAG, "Failed to load ${photoToLoad.fileName}, trying previous photo: ${loadResult.message}")
                         retriesSoFar++
                     }
                     is Result.Loading -> {
-                        android.util.Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying previous")
+                        Log.w(TAG, "Unexpected loading state for ${photoToLoad.fileName}, trying previous")
                         retriesSoFar++
                     }
                 }
+            } catch (e: CancellationException) {
+                // Rethrow CancellationException — never swallow coroutine cancellation
+                throw e
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Exception getting previous photo: ${e.message}, trying previous")
+                Log.e(TAG, "Exception getting previous photo: ${e.message}, trying previous")
                 retriesSoFar++
             }
         }
@@ -466,14 +571,14 @@ class PhotoBufferManager @Inject constructor(
         // 80% of interval to complete before next advance, min 2s, max 10s
         val preloadTimeout = (displayIntervalMs * 0.8).toLong().coerceIn(2_000L, 10_000L)
 
-        // Preload next 2 photos ahead for smoother playback
-        for (i in 1..2) {
+        // Preload photos ahead (count based on device memory)
+        for (i in 1..preloadAhead) {
             val nextIndex = (currentIndex + i) % photos.size
             val photoToPreload = photos[nextIndex]
 
             // Skip videos - no bitmap to preload
             if (photoToPreload.isVideo) {
-                android.util.Log.d(TAG, "preloadNext: Skipping video preload: ${photoToPreload.fileName}")
+                Log.d(TAG, "preloadNext: Skipping video preload: ${photoToPreload.fileName}")
                 continue
             }
 
@@ -489,8 +594,8 @@ class PhotoBufferManager @Inject constructor(
                     withTimeout(preloadTimeout) {
                         imageCache.load(photoToPreload.path)
                     }
-                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    android.util.Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
                     mutex.withLock {
                         preloadJobs.remove(photoToPreload.path)
                     }
@@ -503,11 +608,11 @@ class PhotoBufferManager @Inject constructor(
                             addToBuffer(photoToPreload.path, result.data)
                             preloadJobs.remove(photoToPreload.path)
                         }
-                        android.util.Log.d(TAG, "Preloaded photo +$i ahead: ${photoToPreload.fileName}")
+                        Log.d(TAG, "Preloaded photo +$i ahead: ${photoToPreload.fileName}")
                     }
                     is Result.Error -> {
                         // Log error but don't fail (will load on-demand or skip later)
-                        android.util.Log.w(TAG, "Failed to preload ${photoToPreload.fileName}: ${result.message}")
+                        Log.w(TAG, "Failed to preload ${photoToPreload.fileName}: ${result.message}")
                         mutex.withLock {
                             preloadJobs.remove(photoToPreload.path)
                         }
@@ -536,14 +641,14 @@ class PhotoBufferManager @Inject constructor(
         // 80% of interval to complete before next advance, min 2s, max 10s
         val preloadTimeout = (displayIntervalMs * 0.8).toLong().coerceIn(2_000L, 10_000L)
 
-        // Preload previous 1-2 photos for backward navigation
-        for (i in 1..1) {  // Only 1 previous for backward, since forward is more common
+        // Preload photos behind (count based on device memory)
+        for (i in 1..preloadBehind) {
             val prevIndex = (currentIndex - i + photos.size) % photos.size
             val photoToPreload = photos[prevIndex]
 
             // Skip videos - no bitmap to preload
             if (photoToPreload.isVideo) {
-                android.util.Log.d(TAG, "preloadPrevious: Skipping video preload: ${photoToPreload.fileName}")
+                Log.d(TAG, "preloadPrevious: Skipping video preload: ${photoToPreload.fileName}")
                 continue
             }
 
@@ -559,8 +664,8 @@ class PhotoBufferManager @Inject constructor(
                     withTimeout(preloadTimeout) {
                         imageCache.load(photoToPreload.path)
                     }
-                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    android.util.Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(TAG, "Timeout preloading ${photoToPreload.fileName} after ${preloadTimeout}ms")
                     mutex.withLock {
                         preloadJobs.remove(photoToPreload.path)
                     }
@@ -573,11 +678,11 @@ class PhotoBufferManager @Inject constructor(
                             addToBuffer(photoToPreload.path, result.data)
                             preloadJobs.remove(photoToPreload.path)
                         }
-                        android.util.Log.d(TAG, "Preloaded photo -$i backward: ${photoToPreload.fileName}")
+                        Log.d(TAG, "Preloaded photo -$i backward: ${photoToPreload.fileName}")
                     }
                     is Result.Error -> {
                         // Log error but don't fail (will load on-demand or skip later)
-                        android.util.Log.w(TAG, "Failed to preload ${photoToPreload.fileName}: ${result.message}")
+                        Log.w(TAG, "Failed to preload ${photoToPreload.fileName}: ${result.message}")
                         mutex.withLock {
                             preloadJobs.remove(photoToPreload.path)
                         }
@@ -593,94 +698,6 @@ class PhotoBufferManager @Inject constructor(
     }
 
     /**
-     * Pre-loads the initial buffer on initialization.
-     * Loads Current photo SYNCHRONOUSLY, then loads Current + 1 and Current + 2 in background.
-     * Skips videos (no bitmap to preload).
-     *
-     * Note: Must be called within mutex lock.
-     */
-    private suspend fun preloadInitialBuffer() {
-        if (photos.isEmpty()) return
-
-        val currentPhoto = photos[currentIndex]
-
-        // Load current photo SYNCHRONOUSLY to ensure it's available before initialize() returns
-        if (currentPhoto.isVideo) {
-            android.util.Log.d(TAG, "preloadInitialBuffer: Current item is video, skipping bitmap load: ${currentPhoto.fileName}")
-            _loadingState.value = BufferLoadingState.Ready
-        } else {
-            // Fix #3: Add timeout to initial photo load to prevent indefinite hangs
-            // Load current photo synchronously (blocking) - CRITICAL FIX for black screen
-            val result = try {
-                withTimeout(PRELOAD_TIMEOUT_MS) {
-                    imageCache.load(currentPhoto.path)
-                }
-            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                android.util.Log.e(TAG, "preloadInitialBuffer: Timeout loading current photo after ${PRELOAD_TIMEOUT_MS}ms")
-                _loadingState.value = BufferLoadingState.Error(e)
-                return
-            }
-
-            when (result) {
-                is Result.Success -> {
-                    addToBuffer(currentPhoto.path, result.data)
-                    _loadingState.value = BufferLoadingState.Ready
-                    android.util.Log.d(TAG, "preloadInitialBuffer: Current photo loaded synchronously: ${currentPhoto.fileName}")
-                }
-                is Result.Error -> {
-                    _loadingState.value = BufferLoadingState.Error(result.exception)
-                    android.util.Log.e(TAG, "preloadInitialBuffer: Failed to load current photo: ${result.message}")
-                }
-                is Result.Loading -> {
-                    // Should not happen
-                }
-            }
-        }
-
-        // Pre-load next 2 photos in background (async, non-blocking)
-        val job = scope.launch {
-            for (i in 1..2) {
-                val nextIndex = (currentIndex + i) % photos.size
-                val photo = photos[nextIndex]
-
-                // Skip videos
-                if (photo.isVideo) {
-                    android.util.Log.d(TAG, "preloadInitialBuffer: Skipping video: ${photo.fileName}")
-                    continue
-                }
-
-                if (!buffer.containsKey(photo.path)) {
-                    // Fix #3: Add timeout to preload operations to prevent indefinite hangs
-                    val result = try {
-                        withTimeout(PRELOAD_TIMEOUT_MS) {
-                            imageCache.load(photo.path)
-                        }
-                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                        android.util.Log.w(TAG, "preloadInitialBuffer: Timeout preloading ${photo.fileName} after ${PRELOAD_TIMEOUT_MS}ms")
-                        continue
-                    }
-
-                    when (result) {
-                        is Result.Success -> {
-                            mutex.withLock {
-                                addToBuffer(photo.path, result.data)
-                            }
-                        }
-                        is Result.Error -> {
-                            android.util.Log.w(TAG, "preloadInitialBuffer: Failed to preload ${photo.fileName}: ${result.message}")
-                        }
-                        is Result.Loading -> {
-                            // Should not happen
-                        }
-                    }
-                }
-            }
-        }
-
-        preloadJobs[currentPhoto.path] = job
-    }
-
-    /**
      * Adds a bitmap to the buffer, enforcing LRU eviction.
      * Keeps buffer size at BUFFER_SIZE (5 photos).
      *
@@ -693,10 +710,12 @@ class PhotoBufferManager @Inject constructor(
         buffer[path] = bitmap
 
         // Enforce buffer size limit (LRU eviction)
-        while (buffer.size > BUFFER_SIZE) {
+        // Note: Do NOT call bitmap.recycle() — evicted bitmaps may still be referenced
+        // by the ViewModel StateFlow / Compose rendering pipeline. The GC will free them
+        // once all references are released (safe on API 26+).
+        while (buffer.size > bufferSize) {
             val oldestKey = buffer.keys.first()
-            val evictedBitmap = buffer.remove(oldestKey)
-            evictedBitmap?.recycle() // Recycle bitmap to free memory
+            buffer.remove(oldestKey)
         }
     }
 
@@ -724,8 +743,7 @@ class PhotoBufferManager @Inject constructor(
             preloadJobs.values.forEach { it.cancel() }
             preloadJobs.clear()
 
-            // Recycle all bitmaps
-            buffer.values.forEach { it.recycle() }
+            // Clear all bitmaps (GC will free memory when references are released)
             buffer.clear()
 
             // Reset state
@@ -756,30 +774,29 @@ class PhotoBufferManager @Inject constructor(
             // Get current photo path before clearing buffer
             val currentPhotoPath = photos.getOrNull(currentIndex)?.path
 
-            // Recycle all bitmaps except current photo
-            buffer.entries.forEach { (path, bitmap) ->
-                if (path != currentPhotoPath) {
-                    bitmap.recycle()
-                }
-            }
-
-            // Keep only current photo in buffer
+            // Keep only current photo in buffer (GC frees evicted bitmaps)
             val currentBitmap = currentPhotoPath?.let { buffer[it] }
             buffer.clear()
             if (currentBitmap != null && currentPhotoPath != null) {
                 buffer[currentPhotoPath] = currentBitmap
             }
 
-            android.util.Log.d(TAG, "Reduced buffer to minimum (1 photo) due to memory pressure")
+            Log.d(TAG, "Reduced buffer to minimum (1 photo) due to memory pressure")
         }
     }
 
     companion object {
-        /**
-         * Buffer size: 5 photos for smooth playback.
-         * Layout: [Current - 1, Current, Current + 1, Current + 2, Current + 3]
-         */
-        const val BUFFER_SIZE = 5
+        /** Minimum buffer size regardless of memory. */
+        private const val MIN_BUFFER_SIZE = 5
+
+        /** Maximum buffer size to avoid excessive memory usage. */
+        private const val MAX_BUFFER_SIZE = 20
+
+        /** Estimated bytes per downsampled photo (2560x1600 ARGB_8888). */
+        private const val ESTIMATED_PHOTO_BYTES = 16L * 1024 * 1024 // 16MB
+
+        /** Fraction of max heap to allocate for photo buffer. */
+        private const val HEAP_FRACTION = 0.50
 
         /**
          * Preload timeout: 5 seconds per photo.
@@ -788,6 +805,20 @@ class PhotoBufferManager @Inject constructor(
         private const val PRELOAD_TIMEOUT_MS = 5_000L
 
         private const val TAG = "PhotoBufferManager"
+
+        /**
+         * Calculates buffer size based on available device heap memory.
+         * Allocates up to 50% of max heap for photo buffer.
+         */
+        private fun calculateBufferSize(): Int {
+            val maxHeap = Runtime.getRuntime().maxMemory()
+            val budgetBytes = (maxHeap * HEAP_FRACTION).toLong()
+            val calculated = (budgetBytes / ESTIMATED_PHOTO_BYTES).toInt()
+            val size = calculated.coerceIn(MIN_BUFFER_SIZE, MAX_BUFFER_SIZE)
+            Log.d(TAG, "Buffer sizing: heap=${maxHeap / (1024*1024)}MB, " +
+                "budget=${budgetBytes / (1024*1024)}MB, bufferSize=$size photos")
+            return size
+        }
     }
 }
 

@@ -409,13 +409,8 @@ class SlideshowViewModel @Inject constructor(
         autoAdvanceJob = viewModelScope.launch {
             while (true) {
                 try {
-                    // Get display interval from settings
-                    val settingsResult = settingsRepository.loadSlideshowSettings()
-                    val interval = if (settingsResult is Result.Success) {
-                        settingsResult.data.displayIntervalMillis
-                    } else {
-                        10_000L // Default 10 seconds
-                    }
+                    // Read display interval from state (kept in sync by settings observer)
+                    val interval = _state.value.displayIntervalMillis
 
                     // Start watchdog service unconditionally
                     startWatchdogService(interval)
