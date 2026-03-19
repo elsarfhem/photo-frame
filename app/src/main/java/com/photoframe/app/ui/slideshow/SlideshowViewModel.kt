@@ -141,12 +141,16 @@ class SlideshowViewModel @Inject constructor(
                 val isLoading = values[4] as Boolean
                 val error = values[5] as String?
 
-                // Filter out buffer-level initialization errors before slideshow is initialized
-                // These are transient states that should not be shown to users
-                val filteredError = if (!isInitialized && error?.contains("Call initialize() before") == true) {
-                    null // Suppress initialization error until initialize() is called
-                } else {
-                    error
+                // Suppress errors that should not interrupt the slideshow:
+                // 1. Buffer initialization errors before slideshow is ready
+                // 2. Transient load errors when photos are already loaded (skip silently)
+                val filteredError = when {
+                    !isInitialized && error?.contains("Call initialize() before") == true -> null
+                    photos.isNotEmpty() && error != null -> {
+                        android.util.Log.w("SlideshowViewModel", "Suppressing transient error (photos loaded): $error")
+                        null
+                    }
+                    else -> error
                 }
 
                 _state.update { it.copy(
@@ -549,20 +553,11 @@ class SlideshowViewModel @Inject constructor(
                 is Result.Error -> {
                     val errorMsg = result.message ?: "Failed to load next photo"
                     android.util.Log.e("SlideshowViewModel", "Photo load error: $errorMsg")
-
-                    // Log photo load failure
                     val photoPath = _state.value.currentPhotoMetadata?.path ?: "unknown"
                     telemetryLogger.logPhotoLoadFailed(photoPath, errorMsg)
-
-                    // Only show error in UI if it's a critical failure (10+ consecutive failures)
-                    if (errorMsg.contains("All recent photos failed")) {
-                        _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
-                    }
-                    // Don't update lastSuccessfulAdvanceMs here — let watchdog detect repeated failures
+                    // Don't show error screen — auto-advance will try the next photo
                 }
-                is Result.Loading -> {
-                    // Should not happen
-                }
+                is Result.Loading -> { /* Should not happen */ }
             }
         }
 
@@ -613,20 +608,11 @@ class SlideshowViewModel @Inject constructor(
                 is Result.Error -> {
                     val errorMsg = result.message ?: "Failed to load previous photo"
                     android.util.Log.e("SlideshowViewModel", "Photo load error: $errorMsg")
-
-                    // Log photo load failure
                     val photoPath = _state.value.currentPhotoMetadata?.path ?: "unknown"
                     telemetryLogger.logPhotoLoadFailed(photoPath, errorMsg)
-
-                    // Only show error in UI if it's a critical failure (10+ consecutive failures)
-                    if (errorMsg.contains("All recent photos failed")) {
-                        _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
-                    }
-                    // Don't update lastSuccessfulAdvanceMs here — let watchdog detect repeated failures
+                    // Don't show error screen — auto-advance will try the next photo
                 }
-                is Result.Loading -> {
-                    // Should not happen
-                }
+                is Result.Loading -> { /* Should not happen */ }
             }
         }
 
