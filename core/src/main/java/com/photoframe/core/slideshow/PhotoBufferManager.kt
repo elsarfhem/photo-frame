@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -110,6 +111,75 @@ class PhotoBufferManager @Inject constructor(
             } catch (e: Exception) {
                 _loadingState.value = BufferLoadingState.Error(e)
                 Result.error(e, "Failed to initialize buffer: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Subscribes to photo list updates from repository StateFlow.
+     * FIX 3: Prevents stale photo list desynchronization.
+     *
+     * Should be called after initialize() to keep buffer's photo list
+     * in sync with repository changes (e.g., background scans, shuffles).
+     *
+     * Thread Safety: Safe to call concurrently. Runs in managed scope.
+     *
+     * @param photoListFlow StateFlow from repository providing updated photos
+     */
+    fun subscribeToPhotoUpdates(photoListFlow: StateFlow<List<Photo>>) {
+        scope.launch {
+            photoListFlow.collect { updatedPhotos ->
+                syncPhotoList(updatedPhotos)
+            }
+        }
+    }
+
+    /**
+     * Syncs the buffer's internal photo list with an updated photo list.
+     * Called when repository photo list changes (e.g., after background scan).
+     *
+     * FIX 3: Prevents stale photo list desynchronization by keeping buffer's
+     * photo list in sync with repository changes.
+     *
+     * Thread Safety: Safe to call concurrently. Acquires mutex.
+     *
+     * @param updatedPhotoList New photo list from repository
+     */
+    suspend fun syncPhotoList(updatedPhotoList: List<Photo>) {
+        mutex.withLock {
+            if (updatedPhotoList.isEmpty()) {
+                android.util.Log.w(TAG, "syncPhotoList: Updated photo list is empty, keeping current")
+                return@withLock
+            }
+
+            // Only update if lists differ (avoid unnecessary updates)
+            if (photos == updatedPhotoList) {
+                return@withLock
+            }
+
+            android.util.Log.d(TAG, "syncPhotoList: Syncing from ${photos.size} to ${updatedPhotoList.size} photos")
+
+            // Check if current photo still exists in updated list
+            val currentPhotoPath = photos.getOrNull(currentIndex)?.path
+            val newIndex = if (currentPhotoPath != null) {
+                updatedPhotoList.indexOfFirst { it.path == currentPhotoPath }
+            } else {
+                -1
+            }
+
+            // Update photo list
+            photos = updatedPhotoList
+
+            // Update index if current photo still exists, otherwise keep current index (clamped)
+            if (newIndex >= 0) {
+                currentIndex = newIndex
+                android.util.Log.d(TAG, "syncPhotoList: Current photo still exists at index $newIndex")
+            } else if (currentIndex >= photos.size) {
+                // Current index out of bounds - clamp to last photo
+                currentIndex = (photos.size - 1).coerceAtLeast(0)
+                android.util.Log.w(TAG, "syncPhotoList: Current index out of bounds, clamped to $currentIndex")
+            } else {
+                android.util.Log.d(TAG, "syncPhotoList: Kept current index $currentIndex (still valid)")
             }
         }
     }

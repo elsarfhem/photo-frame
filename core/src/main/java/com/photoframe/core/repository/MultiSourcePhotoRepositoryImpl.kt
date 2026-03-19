@@ -234,6 +234,9 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                         // Only set _photos AFTER buffer initialization succeeds
                         _photos.value = photoList
 
+                        // FIX 3: Subscribe buffer to photo updates to prevent stale list desynchronization
+                        photoBufferManager.subscribeToPhotoUpdates(_photos)
+
                         val firstPhoto = photoBufferManager.getCurrentPhoto()
                         _currentPhoto.value = firstPhoto
                         _currentPhotoMetadata.value = photoList.getOrNull(currentIndex)
