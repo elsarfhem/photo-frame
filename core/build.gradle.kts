@@ -56,6 +56,9 @@ dependencies {
     // Coil for image loading
     implementation("io.coil-kt:coil:2.7.0")
 
+    // EXIF orientation support for RAW image decoding
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     // ExoPlayer for video playback
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")

@@ -167,6 +167,8 @@ class SmbPhotoDataSource @Inject constructor(
      * @return true if file is a supported media format
      */
     private fun isPhotoFile(fileName: String): Boolean {
+        // Skip macOS resource fork files (._filename) — they're metadata, not real photos
+        if (fileName.startsWith("._")) return false
         val extension = fileName.substringAfterLast('.', "").lowercase()
         return extension in SUPPORTED_EXTENSIONS
     }

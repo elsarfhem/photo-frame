@@ -3,9 +3,11 @@ package com.photoframe.core.image
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.exifinterface.media.ExifInterface
 import com.photoframe.core.model.Result
 import java.io.ByteArrayInputStream
 import java.nio.ByteBuffer
@@ -129,8 +131,9 @@ object RawImageDecoder {
                     val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
 
                     if (bitmap != null) {
-                        Log.d(TAG, "Extracted JPEG preview from $extension (${bitmap.width}x${bitmap.height})")
-                        return Result.success(bitmap)
+                        val rotated = applyExifOrientation(bitmap, jpegBytes)
+                        Log.d(TAG, "Extracted JPEG preview from $extension (${rotated.width}x${rotated.height})")
+                        return Result.success(rotated)
                     }
                 } catch (e: Exception) {
                     // Try next JPEG region
@@ -147,6 +150,53 @@ object RawImageDecoder {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to extract JPEG from $extension: ${e.message}", e)
             return Result.error(e, "Failed to extract preview: ${e.message}")
+        }
+    }
+
+    /**
+     * Reads EXIF orientation from JPEG bytes and rotates/flips the bitmap if needed.
+     * BitmapFactory.decodeByteArray() does NOT apply EXIF orientation — we must do it manually.
+     *
+     * @param bitmap Decoded bitmap (not yet orientation-corrected)
+     * @param jpegBytes Original JPEG bytes containing EXIF data
+     * @return Correctly oriented bitmap (may be the same instance if no rotation needed)
+     */
+    private fun applyExifOrientation(bitmap: Bitmap, jpegBytes: ByteArray): Bitmap {
+        return try {
+            val exif = ExifInterface(ByteArrayInputStream(jpegBytes))
+            val orientation = exif.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+
+            val matrix = Matrix()
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    matrix.postRotate(90f)
+                    matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    matrix.postRotate(270f)
+                    matrix.postScale(-1f, 1f)
+                }
+                else -> return bitmap // ORIENTATION_NORMAL or ORIENTATION_UNDEFINED — no rotation
+            }
+
+            Log.d(TAG, "Applying EXIF orientation $orientation to ${bitmap.width}x${bitmap.height}")
+            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (rotated !== bitmap) {
+                // Original bitmap is no longer needed — allow GC to reclaim
+                // (safe since we haven't exposed it to any external reference yet)
+            }
+            rotated
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read EXIF orientation, using bitmap as-is: ${e.message}")
+            bitmap
         }
     }
 
