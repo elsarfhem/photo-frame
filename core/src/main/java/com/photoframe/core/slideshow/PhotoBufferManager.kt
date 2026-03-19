@@ -61,8 +61,8 @@ class PhotoBufferManager @Inject constructor(
     // Pre-loading jobs
     private val preloadJobs = mutableMapOf<String, Job>()
 
-    // Managed coroutine scope for background jobs (FIX 2: prevents orphaned coroutines)
-    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
+    // Managed coroutine scope for background jobs (prevents orphaned coroutines)
+    private var scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     /**
      * Initializes the buffer with a list of photos.
@@ -734,8 +734,9 @@ class PhotoBufferManager @Inject constructor(
             _loadingState.value = BufferLoadingState.Idle
         }
 
-        // FIX 2: Cancel managed scope to ensure all background coroutines are terminated
+        // Cancel managed scope and recreate it so it's usable after re-initialization
         scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     }
 
     /**

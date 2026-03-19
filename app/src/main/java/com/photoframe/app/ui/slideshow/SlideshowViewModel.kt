@@ -563,9 +563,7 @@ class SlideshowViewModel @Inject constructor(
                     if (errorMsg.contains("All recent photos failed")) {
                         _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
                     }
-                    // Otherwise: auto-advance will skip to next photo on next timer tick
-                    // Update advance time so watchdog doesn't trigger during normal skip
-                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
+                    // Don't update lastSuccessfulAdvanceMs here — let watchdog detect repeated failures
                 }
                 is Result.Loading -> {
                     // Should not happen
@@ -629,9 +627,7 @@ class SlideshowViewModel @Inject constructor(
                     if (errorMsg.contains("All recent photos failed")) {
                         _state.update { it.copy(error = "Unable to load photos. Check network connection.") }
                     }
-                    // Otherwise: auto-advance will skip to next photo on next timer tick
-                    // Update advance time so watchdog doesn't trigger during normal skip
-                    lastSuccessfulAdvanceMs = System.currentTimeMillis()
+                    // Don't update lastSuccessfulAdvanceMs here — let watchdog detect repeated failures
                 }
                 is Result.Loading -> {
                     // Should not happen
