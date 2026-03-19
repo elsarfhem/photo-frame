@@ -75,8 +75,8 @@ object CoreModule {
 
     @Provides
     @Singleton
-    fun provideSmbClient(): SmbClient {
-        return JcifsSmbClient(connectionTimeoutMs = 30_000, responseTimeoutMs = 30_000)
+    fun provideSmbClient(@IoDispatcher ioDispatcher: CoroutineDispatcher): SmbClient {
+        return JcifsSmbClient(ioDispatcher = ioDispatcher)
     }
 
     @Provides

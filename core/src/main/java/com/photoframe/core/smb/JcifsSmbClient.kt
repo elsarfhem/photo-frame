@@ -1,5 +1,6 @@
 package com.photoframe.core.smb
 
+import android.util.Log
 import com.photoframe.core.model.Result
 import com.photoframe.core.model.SmbConnection
 import jcifs.CIFSContext
@@ -8,9 +9,14 @@ import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbException
 import jcifs.smb.SmbFile as JcifsSmbFile
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.util.Properties
 
 /**
@@ -23,18 +29,27 @@ import java.util.Properties
  * - Minimum protocol: SMB 2.1.0
  * - Maximum protocol: SMB 3.1.1
  * - SMB signing: Preferred (enabled when server supports it)
- * - Connection timeout: 30 seconds
- * - Response timeout: 30 seconds
+ * - Connection timeout: 5 seconds
+ * - Response timeout: 10 seconds
+ * - Socket timeout: 10 seconds
+ *
+ * I/O Cancellation: All blocking operations are wrapped in `runInterruptible`
+ * so that coroutine cancellation interrupts the blocked thread. File reads use
+ * chunked I/O (64KB) with interrupt checks between chunks for fast cancellation.
  *
  * Thread Safety: Protected by Mutex for all mutable state operations.
  * Safe to call from multiple coroutines concurrently.
  *
- * @param connectionTimeoutMs Connection timeout in milliseconds (default: 30000)
- * @param responseTimeoutMs Response timeout in milliseconds (default: 30000)
+ * @param ioDispatcher Dispatcher for blocking I/O operations
+ * @param connectionTimeoutMs TCP connection timeout in milliseconds (default: 5000)
+ * @param responseTimeoutMs SMB response timeout in milliseconds (default: 10000)
+ * @param socketTimeoutMs Socket read timeout in milliseconds (default: 10000)
  */
 class JcifsSmbClient(
-    private val connectionTimeoutMs: Long = 30000,
-    private val responseTimeoutMs: Long = 30000
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val connectionTimeoutMs: Long = 5_000,
+    private val responseTimeoutMs: Long = 10_000,
+    private val socketTimeoutMs: Long = 10_000
 ) : SmbClient {
 
     private val mutex = Mutex()
@@ -51,7 +66,7 @@ class JcifsSmbClient(
      * CRITICAL SECURITY CONFIGURATION:
      * - Enforces SMB 2.1.0 minimum (rejects SMB 1.x which is insecure)
      * - Enables SMB signing for message authentication
-     * - Sets reasonable timeouts (30 seconds)
+     * - Sets reduced timeouts for fast cancellation
      */
     private fun createSecureConfiguration(): PropertyConfiguration {
         val properties = Properties().apply {
@@ -66,7 +81,7 @@ class JcifsSmbClient(
             // Timeouts (in milliseconds)
             setProperty("jcifs.smb.client.connTimeout", connectionTimeoutMs.toString())
             setProperty("jcifs.smb.client.responseTimeout", responseTimeoutMs.toString())
-            setProperty("jcifs.smb.client.soTimeout", responseTimeoutMs.toString())
+            setProperty("jcifs.smb.client.soTimeout", socketTimeoutMs.toString())
 
             // Disable DNS lookups for performance
             setProperty("jcifs.resolveOrder", "BCAST")
@@ -95,31 +110,27 @@ class JcifsSmbClient(
 
                 // Create authenticator
                 val authenticator = if (connection.domain != null) {
-                    // Domain authentication
                     NtlmPasswordAuthenticator(
                         connection.domain,
                         connection.username,
                         password
                     )
                 } else {
-                    // Workgroup authentication (no domain)
                     NtlmPasswordAuthenticator(
                         connection.username,
                         password
                     )
                 }
 
-                // Create authenticated context
                 val context = baseContext.withCredentials(authenticator)
 
-                // Test the connection by listing root directory
+                // Test connection — runInterruptible converts cancellation → thread interrupt
                 val testPath = connection.serverUrl.trimEnd('/') + "/"
-                val smbFile = JcifsSmbFile(testPath, context)
+                runInterruptible(ioDispatcher) {
+                    val smbFile = JcifsSmbFile(testPath, context)
+                    smbFile.exists()
+                }
 
-                // This will throw if connection fails (authentication, network, etc.)
-                smbFile.exists()
-
-                // Connection successful
                 currentContext = context
                 currentConnection = connection
 
@@ -160,38 +171,40 @@ class JcifsSmbClient(
             )
 
         return try {
-            val smbDir = JcifsSmbFile(directoryPath, context)
+            runInterruptible(ioDispatcher) {
+                val smbDir = JcifsSmbFile(directoryPath, context)
 
-            if (!smbDir.exists()) {
-                return Result.error(
-                    IOException("Directory not found: $directoryPath"),
-                    "Directory does not exist"
-                )
-            }
-
-            if (!smbDir.isDirectory) {
-                return Result.error(
-                    IOException("Path is not a directory: $directoryPath"),
-                    "Path must be a directory"
-                )
-            }
-
-            val files = smbDir.listFiles()?.mapNotNull { jcifsFile ->
-                try {
-                    SmbFile(
-                        path = jcifsFile.path,
-                        name = jcifsFile.name.trimEnd('/'),
-                        isDirectory = jcifsFile.isDirectory,
-                        size = if (jcifsFile.isDirectory) 0 else jcifsFile.length(),
-                        lastModified = jcifsFile.lastModified()
+                if (!smbDir.exists()) {
+                    return@runInterruptible Result.error(
+                        IOException("Directory not found: $directoryPath"),
+                        "Directory does not exist"
                     )
-                } catch (e: Exception) {
-                    // Skip files that can't be accessed (permission denied, etc.)
-                    null
                 }
-            } ?: emptyList()
 
-            Result.success(files)
+                if (!smbDir.isDirectory) {
+                    return@runInterruptible Result.error(
+                        IOException("Path is not a directory: $directoryPath"),
+                        "Path must be a directory"
+                    )
+                }
+
+                val files = smbDir.listFiles()?.mapNotNull { jcifsFile ->
+                    try {
+                        SmbFile(
+                            path = jcifsFile.path,
+                            name = jcifsFile.name.trimEnd('/'),
+                            isDirectory = jcifsFile.isDirectory,
+                            size = if (jcifsFile.isDirectory) 0 else jcifsFile.length(),
+                            lastModified = jcifsFile.lastModified()
+                        )
+                    } catch (e: Exception) {
+                        // Skip files that can't be accessed (permission denied, etc.)
+                        null
+                    }
+                } ?: emptyList()
+
+                Result.success(files)
+            }
         } catch (e: SmbException) {
             Result.error(e, mapSmbExceptionMessage(e))
         } catch (e: IOException) {
@@ -209,24 +222,54 @@ class JcifsSmbClient(
             )
 
         return try {
-            val smbFile = JcifsSmbFile(filePath, context)
+            runInterruptible(ioDispatcher) {
+                val smbFile = JcifsSmbFile(filePath, context)
 
-            if (!smbFile.exists()) {
-                return Result.error(
-                    IOException("File not found: $filePath"),
-                    "File does not exist"
-                )
+                if (!smbFile.exists()) {
+                    return@runInterruptible Result.error(
+                        IOException("File not found: $filePath"),
+                        "File does not exist"
+                    )
+                }
+
+                if (smbFile.isDirectory) {
+                    return@runInterruptible Result.error(
+                        IOException("Path is a directory: $filePath"),
+                        "Path must be a file"
+                    )
+                }
+
+                val fileSize = smbFile.length()
+                if (fileSize > MAX_FILE_SIZE_BYTES) {
+                    return@runInterruptible Result.error(
+                        IOException("File too large: ${fileSize / (1024 * 1024)}MB exceeds ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB limit"),
+                        "File too large to load into memory"
+                    )
+                }
+
+                // Chunked read with interrupt checks between chunks.
+                // readBytes() blocks until EOF with no cancellation points.
+                // Reading in 64KB chunks lets us check Thread.interrupted()
+                // between reads, so coroutine cancellation (via runInterruptible)
+                // takes effect within one chunk rather than waiting for socket timeout.
+                smbFile.inputStream.use { input ->
+                    val output = ByteArrayOutputStream(fileSize.toInt().coerceAtMost(INITIAL_BUFFER_BYTES))
+                    val chunk = ByteArray(READ_CHUNK_BYTES)
+                    var bytesRead: Int
+
+                    while (input.read(chunk).also { bytesRead = it } != -1) {
+                        if (Thread.interrupted()) {
+                            throw InterruptedIOException("SMB read interrupted")
+                        }
+                        output.write(chunk, 0, bytesRead)
+                    }
+
+                    Result.success(output.toByteArray())
+                }
             }
-
-            if (smbFile.isDirectory) {
-                return Result.error(
-                    IOException("Path is a directory: $filePath"),
-                    "Path must be a file"
-                )
-            }
-
-            val bytes = smbFile.inputStream.use { it.readBytes() }
-            Result.success(bytes)
+        } catch (e: InterruptedIOException) {
+            Log.d(TAG, "readFile interrupted (coroutine cancelled): $filePath")
+            Result.error(e, "Read cancelled")
         } catch (e: SmbException) {
             Result.error(e, mapSmbExceptionMessage(e))
         } catch (e: IOException) {
@@ -246,11 +289,9 @@ class JcifsSmbClient(
                 )
             }
 
-            // Create secure configuration (SMB 2.0+ only)
             val config = createSecureConfiguration()
             val baseContext = BaseContext(config)
 
-            // Create authenticator
             val authenticator = if (connection.domain != null) {
                 NtlmPasswordAuthenticator(
                     connection.domain,
@@ -264,13 +305,14 @@ class JcifsSmbClient(
                 )
             }
 
-            // Create authenticated context
             val context = baseContext.withCredentials(authenticator)
 
-            // Test the connection
-            val testPath = connection.serverUrl.trimEnd('/') + "/"
-            val smbFile = JcifsSmbFile(testPath, context)
-            smbFile.exists() // Will throw if connection fails
+            // Test connection — runInterruptible converts cancellation → thread interrupt
+            runInterruptible(ioDispatcher) {
+                val testPath = connection.serverUrl.trimEnd('/') + "/"
+                val smbFile = JcifsSmbFile(testPath, context)
+                smbFile.exists()
+            }
 
             Result.success(Unit)
         } catch (e: SmbException) {
@@ -284,6 +326,19 @@ class JcifsSmbClient(
 
     override fun isConnected(): Boolean {
         return currentContext != null && currentConnection != null
+    }
+
+    companion object {
+        private const val TAG = "JcifsSmbClient"
+
+        /** Chunk size for interruptible file reads (64KB). */
+        private const val READ_CHUNK_BYTES = 64 * 1024
+
+        /** Initial buffer capacity hint to avoid resizing (1MB). */
+        private const val INITIAL_BUFFER_BYTES = 1024 * 1024
+
+        /** Maximum file size we'll read into memory (100MB). */
+        private const val MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024
     }
 
     /**
