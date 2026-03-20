@@ -33,9 +33,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 }
 
 dependencies {
@@ -73,8 +70,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     // Hilt dependency injection
-    implementation("com.google.dagger:hilt-android:2.51.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    implementation("com.google.dagger:hilt-android:2.53.1")
+    ksp("com.google.dagger:hilt-android-compiler:2.53.1")
 
     // Hilt WorkManager integration
     implementation("androidx.hilt:hilt-work:1.2.0")
