@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -148,12 +151,15 @@ fun SlideshowScreen(
                     displayIntervalMillis = state.displayIntervalMillis,
                     panAnimationEnabled = state.panAnimationEnabled,
                     navigationDirection = state.navigationDirection,
+                    currentRotation = state.currentRotation,
                     viewModel = viewModel,
                     onPlayPause = { playing ->
                         isPlayingLocal = playing  // Immediate Compose snapshot update
                         if (playing) viewModel.play() else viewModel.pause()
                     },
-                    onNavigateToSettings = onNavigateToSettings
+                    onNavigateToSettings = onNavigateToSettings,
+                    onRotateClockwise = viewModel::rotateClockwise,
+                    onRotateCounterClockwise = viewModel::rotateCounterClockwise
                 )
 
                 // Connection status indicator (top-right corner)
@@ -334,23 +340,28 @@ private fun MediaContent(
     displayIntervalMillis: Long,
     panAnimationEnabled: Boolean,
     navigationDirection: NavigationDirection,
+    currentRotation: Int = 0,
     viewModel: SlideshowViewModel = hiltViewModel(),
     onPlayPause: (Boolean) -> Unit = {},
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToSettings: () -> Unit = {},
+    onRotateClockwise: () -> Unit = {},
+    onRotateCounterClockwise: () -> Unit = {}
 ) {
     val view = LocalView.current
     var dragOffset by remember { mutableStateOf(0f) }
     var showControls by remember { mutableStateOf(false) }
+    var controlsRevision by remember { mutableStateOf(0) }
 
     // Keep updated references for values read inside pointerInput (which captures at composition time)
     val currentIsPlaying by rememberUpdatedState(isPlaying)
     val currentOnPlayPause by rememberUpdatedState(onPlayPause)
+    val currentShowControls by rememberUpdatedState(showControls)
 
     // Get VideoPlayerViewModel for SmbDataSourceFactory injection
     val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
 
-    // Auto-hide controls after 3 seconds
-    LaunchedEffect(showControls) {
+    // Auto-hide controls after 3 seconds (revision resets timer)
+    LaunchedEffect(showControls, controlsRevision) {
         if (showControls) {
             kotlinx.coroutines.delay(3000)
             showControls = false
@@ -361,10 +372,10 @@ private fun MediaContent(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                // Combined gesture detector to avoid conflicts between tap and drag
-                // Detects both taps (for navigation/controls) and horizontal drags (for swipe)
+                // Combined gesture detector: tap to show overlay, then tap zones to act
+                // Swipes always navigate regardless of overlay state
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown()
                     val downPosition = down.position
                     var totalDrag = 0f
                     var hasDragged = false
@@ -380,21 +391,23 @@ private fun MediaContent(
                         }
                     } while (event.changes.any { it.pressed })
 
-                    // Determine if this was a tap or drag based on movement
+                    // Swipes always work regardless of overlay state
                     if (hasDragged && abs(totalDrag) > SWIPE_THRESHOLD) {
-                        // Horizontal drag detected - handle as swipe
                         view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                         if (totalDrag > 0) {
                             viewModel.previousPhoto(pauseAutoAdvance = false)
                         } else {
                             viewModel.nextPhoto(pauseAutoAdvance = false)
                         }
+                        return@awaitEachGesture
+                    }
+
+                    // Tap: first tap shows overlay, second tap performs action
+                    if (!currentShowControls) {
+                        showControls = true
                     } else {
-                        // Tap (or small drag below swipe threshold) - handle as tap
-                        // Always act immediately AND show overlay as visual feedback
                         val screenWidth = size.width
                         val tapX = downPosition.x
-
                         when {
                             tapX < screenWidth / 3 -> {
                                 view.performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
@@ -409,13 +422,22 @@ private fun MediaContent(
                                 currentOnPlayPause(!currentIsPlaying)
                             }
                         }
-                        // Show overlay briefly for visual feedback
-                        showControls = true
+                        // Reset auto-hide timer
+                        controlsRevision++
                     }
                 }
             },
         contentAlignment = Alignment.Center
     ) {
+        // Apply user rotation to bitmap
+        val rotatedBitmap = remember(bitmap, currentRotation) {
+            if (bitmap == null || currentRotation % 360 == 0) bitmap
+            else {
+                val matrix = android.graphics.Matrix().apply { postRotate(currentRotation.toFloat()) }
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            }
+        }
+
         // Animated media display with transitions
         // Use fileName as key to prevent VideoPlayer disposal during transitions
         AnimatedContent(
@@ -432,7 +454,7 @@ private fun MediaContent(
             label = "media_transition"
         ) { fileName ->
             // Check if current media is a video
-            android.util.Log.d("SlideshowScreen", "Rendering media: fileName=$fileName, isVideo=${photoMetadata?.isVideo}, hasBitmap=${bitmap != null}")
+            android.util.Log.d("SlideshowScreen", "Rendering media: fileName=$fileName, isVideo=${photoMetadata?.isVideo}, hasBitmap=${rotatedBitmap != null}")
 
             if (photoMetadata?.isVideo == true) {
                 // Display video player with SMB support
@@ -446,11 +468,11 @@ private fun MediaContent(
                     smbDataSourceFactory = videoPlayerViewModel.smbDataSourceFactory,
                     modifier = Modifier.fillMaxSize()
                 )
-            } else if (bitmap != null) {
+            } else if (rotatedBitmap != null) {
                 // Apply Ken Burns or Pan animation based on settings
                 if (transitionType == com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS) {
                     ZoomTransition(
-                        bitmap = bitmap,
+                        bitmap = rotatedBitmap,
                         photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
                         durationMillis = displayIntervalMillis.toInt(),
@@ -459,7 +481,7 @@ private fun MediaContent(
                 } else if (panAnimationEnabled) {
                     // Apply pan animation with crop (no black bands)
                     PanTransition(
-                        bitmap = bitmap,
+                        bitmap = rotatedBitmap,
                         photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
                         durationMillis = displayIntervalMillis.toInt(),
@@ -468,7 +490,7 @@ private fun MediaContent(
                 } else {
                     // Display photo with standard scale (letterbox/pillarbox)
                     Image(
-                        bitmap = bitmap.asImageBitmap(),
+                        bitmap = rotatedBitmap.asImageBitmap(),
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit // Scale-to-fit, preserves aspect ratio
@@ -477,7 +499,7 @@ private fun MediaContent(
 
             } else {
                 // Neither video nor valid bitmap - black screen
-                android.util.Log.w("SlideshowScreen", "BLACK SCREEN: No content to render. isVideo=${photoMetadata?.isVideo}, hasBitmap=${bitmap != null}")
+                android.util.Log.w("SlideshowScreen", "BLACK SCREEN: No content to render. isVideo=${photoMetadata?.isVideo}, hasBitmap=${rotatedBitmap != null}")
             }
         }
 
@@ -487,7 +509,10 @@ private fun MediaContent(
                 isPlaying = isPlaying,
                 photoIndex = photoIndex,
                 totalPhotos = totalPhotos,
-                onNavigateToSettings = onNavigateToSettings
+                isVideo = photoMetadata?.isVideo == true,
+                onNavigateToSettings = onNavigateToSettings,
+                onRotateClockwise = onRotateClockwise,
+                onRotateCounterClockwise = onRotateCounterClockwise
             )
         }
     }
@@ -501,26 +526,48 @@ private fun ControlOverlay(
     isPlaying: Boolean,
     photoIndex: Int,
     totalPhotos: Int,
-    onNavigateToSettings: () -> Unit = {}
+    isVideo: Boolean = false,
+    onNavigateToSettings: () -> Unit = {},
+    onRotateClockwise: () -> Unit = {},
+    onRotateCounterClockwise: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.3f))
     ) {
-        // Settings button (top-right corner)
-        IconButton(
-            onClick = onNavigateToSettings,
+        // Top-right controls: rotate buttons + settings
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(16.dp)
         ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Settings",
-                modifier = Modifier.size(48.dp),
-                tint = Color.White.copy(alpha = 0.9f)
-            )
+            if (!isVideo) {
+                IconButton(onClick = onRotateCounterClockwise) {
+                    Icon(
+                        imageVector = Icons.Filled.RotateLeft,
+                        contentDescription = "Rotate counter-clockwise",
+                        modifier = Modifier.size(48.dp),
+                        tint = Color.White.copy(alpha = 0.9f)
+                    )
+                }
+                IconButton(onClick = onRotateClockwise) {
+                    Icon(
+                        imageVector = Icons.Filled.RotateRight,
+                        contentDescription = "Rotate clockwise",
+                        modifier = Modifier.size(48.dp),
+                        tint = Color.White.copy(alpha = 0.9f)
+                    )
+                }
+            }
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Settings",
+                    modifier = Modifier.size(48.dp),
+                    tint = Color.White.copy(alpha = 0.9f)
+                )
+            }
         }
 
         // Left zone indicator

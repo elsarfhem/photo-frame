@@ -13,8 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.photoframe.app.BuildConfig
 import com.photoframe.core.model.TransitionType
 
 /**
@@ -92,6 +94,17 @@ fun SettingsScreen(
                 onSave = viewModel::saveSettings,
                 onReset = viewModel::resetToDefaults,
                 onDismissSaveResult = viewModel::clearSaveResult
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Version info
+            Text(
+                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }

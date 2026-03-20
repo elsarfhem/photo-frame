@@ -41,7 +41,8 @@ data class SlideshowState(
     val transitionType: TransitionType = TransitionType.DEFAULT,
     val displayIntervalMillis: Long = 10_000L,
     val panAnimationEnabled: Boolean = true,
-    val navigationDirection: NavigationDirection = NavigationDirection.FORWARD
+    val navigationDirection: NavigationDirection = NavigationDirection.FORWARD,
+    val currentRotation: Int = 0
 ) {
     /**
      * Returns true if slideshow is ready to display media (photos or videos).

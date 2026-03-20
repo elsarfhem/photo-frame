@@ -20,6 +20,7 @@ import com.photoframe.core.reliability.MemoryMonitor
 import com.photoframe.core.telemetry.TelemetryLogger
 import com.photoframe.core.repository.MultiSourcePhotoRepository
 import com.photoframe.core.repository.MultiSourcePhotoRepositoryImpl
+import com.photoframe.core.repository.PhotoRotationStore
 import com.photoframe.core.repository.SettingsRepository
 import com.photoframe.core.repository.SettingsRepositoryImpl
 import com.photoframe.core.repository.SlideshowRepository
@@ -136,6 +137,15 @@ object CoreModule {
         @IoDispatcher ioDispatcher: CoroutineDispatcher
     ): IncrementalPhotoLoader {
         return IncrementalPhotoLoader(smbPhotoDataSource, ioDispatcher)
+    }
+
+    @Provides
+    @Singleton
+    fun providePhotoRotationStore(
+        dataStore: DataStore<Preferences>,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
+    ): PhotoRotationStore {
+        return PhotoRotationStore(dataStore, ioDispatcher)
     }
 
     @Provides

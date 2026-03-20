@@ -64,7 +64,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.3.1")
 
     // DataStore Preferences
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    api("androidx.datastore:datastore-preferences:1.1.1")
 
 
     // WorkManager for background tasks

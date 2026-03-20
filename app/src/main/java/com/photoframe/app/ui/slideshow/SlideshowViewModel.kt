@@ -12,6 +12,7 @@ import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.MemoryMonitor
 import com.photoframe.core.reliability.MemoryState
 import com.photoframe.core.reliability.SlideshowWatchdog
+import com.photoframe.core.repository.PhotoRotationStore
 import com.photoframe.core.repository.SettingsRepository
 import com.photoframe.core.telemetry.TelemetryLogger
 import com.photoframe.core.repository.SlideshowRepository
@@ -73,7 +74,8 @@ class SlideshowViewModel @Inject constructor(
     private val networkMonitor: NetworkMonitor,
     private val memoryMonitor: MemoryMonitor,
     private val crashHandler: CrashHandler,
-    private val telemetryLogger: TelemetryLogger
+    private val telemetryLogger: TelemetryLogger,
+    private val photoRotationStore: PhotoRotationStore
 ) : ViewModel() {
 
     // UI state
@@ -153,13 +155,19 @@ class SlideshowViewModel @Inject constructor(
                     else -> error
                 }
 
+                // Load persisted rotation for the current photo
+                val rotation = if (metadata != null && !metadata.isVideo) {
+                    photoRotationStore.getRotation(metadata.path)
+                } else 0
+
                 _state.update { it.copy(
                     currentPhoto = currentPhoto,
                     currentPhotoMetadata = metadata,
                     photoIndex = photoIndex.coerceAtLeast(0),
                     totalPhotos = photos.size,
                     isLoading = isLoading,
-                    error = filteredError
+                    error = filteredError,
+                    currentRotation = rotation
                 ) }
             }.collect { }
         }
@@ -527,6 +535,20 @@ class SlideshowViewModel @Inject constructor(
 
         // Phase 4: Stop watchdog service
         stopWatchdogService()
+    }
+
+    fun rotateClockwise() {
+        val path = _state.value.currentPhotoMetadata?.path ?: return
+        val newRotation = (_state.value.currentRotation + 90) % 360
+        _state.update { it.copy(currentRotation = newRotation) }
+        viewModelScope.launch { photoRotationStore.setRotation(path, newRotation) }
+    }
+
+    fun rotateCounterClockwise() {
+        val path = _state.value.currentPhotoMetadata?.path ?: return
+        val newRotation = ((_state.value.currentRotation - 90) + 360) % 360
+        _state.update { it.copy(currentRotation = newRotation) }
+        viewModelScope.launch { photoRotationStore.setRotation(path, newRotation) }
     }
 
     /**
