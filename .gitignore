@@ -81,5 +81,6 @@ Thumbs.db
 .idea
 .serena
 .claude/
+CLAUDE.md
 docs/
 firebase-debug.log
