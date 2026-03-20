@@ -155,7 +155,7 @@ class SlideshowWatchdog : Service() {
                     throw e  // Re-throw to properly cancel the coroutine
                 } catch (e: Exception) {
                     android.util.Log.e(TAG, "Error in watchdog monitoring", e)
-                    // TODO: Log to Crashlytics: "watchdog_monitoring_error"
+                    telemetryLogger.logEvent("watchdog_monitoring_error", e.message, e)
                 }
             }
         }

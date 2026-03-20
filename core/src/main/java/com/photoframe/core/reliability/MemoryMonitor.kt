@@ -70,8 +70,7 @@ class MemoryMonitor @Inject constructor(
                     checkMemoryUsage()
                     delay(MONITORING_INTERVAL_MS)
                 } catch (e: Exception) {
-                    // Log error but continue monitoring
-                    // TODO: Log to Crashlytics
+                    telemetryLogger.logException(e)
                 }
             }
         }

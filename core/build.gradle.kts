@@ -66,6 +66,10 @@ dependencies {
     // DataStore Preferences
     api("androidx.datastore:datastore-preferences:1.1.1")
 
+    // Firebase Crashlytics
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-crashlytics")
+
 
     // WorkManager for background tasks
     implementation("androidx.work:work-runtime-ktx:2.9.1")
