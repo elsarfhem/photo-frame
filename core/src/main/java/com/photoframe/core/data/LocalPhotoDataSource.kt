@@ -4,7 +4,10 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.util.Log
+import android.webkit.MimeTypeMap
 import com.photoframe.core.di.IoDispatcher
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.Result
@@ -113,25 +116,57 @@ class LocalPhotoDataSource @Inject constructor(
     }
 
     /**
-     * Queries a specific folder URI for photos.
+     * Queries a SAF tree URI for photos using DocumentsContract.
      *
-     * @param folderUri Content URI of folder to scan
-     * @return List of photos in folder
+     * @param folderUri Tree URI from OpenDocumentTree
+     * @return List of photos in folder (recursive)
      */
     private fun queryFolder(folderUri: Uri): List<Photo> {
-        // For scoped storage, we need to query MediaStore and filter by data path
-        // This is a simplified implementation - full implementation would use
-        // DocumentsContract.buildChildDocumentsUriUsingTree() for proper folder scanning
+        val photos = mutableListOf<Photo>()
+        val docId = DocumentsContract.getTreeDocumentId(folderUri)
+        scanDocumentTree(folderUri, docId, photos)
+        Log.d(TAG, "queryFolder: Found ${photos.size} photos in $folderUri")
+        return photos
+    }
 
-        // For now, query all media and filter by folder
-        // In production, implement proper tree document querying
-        return queryMediaStore(
-            uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            selection = null,
-            selectionArgs = null
-        ).filter { photo ->
-            // Simple path matching - in production use proper folder URI matching
-            true // TODO: Implement proper folder filtering
+    private fun scanDocumentTree(treeUri: Uri, parentDocId: String, photos: MutableList<Photo>) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        )
+
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+            val dateCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
+            while (cursor.moveToNext()) {
+                val docId = cursor.getString(idCol)
+                val name = cursor.getString(nameCol) ?: continue
+                val mimeType = cursor.getString(mimeCol) ?: continue
+                val size = cursor.getLong(sizeCol)
+                val lastModified = cursor.getLong(dateCol)
+
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    // Recurse into subdirectory
+                    scanDocumentTree(treeUri, docId, photos)
+                } else if (isSupportedMimeType(mimeType)) {
+                    val contentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                    photos.add(Photo(
+                        path = contentUri.toString(),
+                        fileName = name,
+                        fileSize = size,
+                        lastModified = lastModified,
+                        mimeType = mimeType
+                    ))
+                }
+            }
         }
     }
 
@@ -221,6 +256,8 @@ class LocalPhotoDataSource @Inject constructor(
         /**
          * Supported image MIME types.
          */
+        private const val TAG = "LocalPhotoDataSource"
+
         private val SUPPORTED_MIME_TYPES = setOf(
             "image/jpeg",
             "image/jpg",

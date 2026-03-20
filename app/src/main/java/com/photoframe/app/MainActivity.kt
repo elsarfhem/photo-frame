@@ -73,6 +73,7 @@ fun PhotoFrameApp(
     photoSourcesManager: PhotoSourcesManager
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Loading) }
+    var slideshowReloadTrigger by remember { mutableStateOf(0) }
 
     // Check for configured sources and navigate appropriately
     LaunchedEffect(Unit) {
@@ -105,13 +106,14 @@ fun PhotoFrameApp(
                 SlideshowScreen(
                     onNavigateToSettings = {
                         currentScreen = Screen.Settings
-                    }
+                    },
+                    reloadTrigger = slideshowReloadTrigger
                 )
             }
             is Screen.Settings -> {
                 SettingsScreen(
                     onNavigateBack = {
-                        // After saving settings, return to slideshow
+                        slideshowReloadTrigger++
                         currentScreen = Screen.Slideshow
                     },
                     onNavigateToSources = {

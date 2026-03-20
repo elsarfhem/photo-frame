@@ -715,6 +715,22 @@ class SlideshowViewModel @Inject constructor(
         initialize(shuffleEnabled = false)
     }
 
+    fun reload() {
+        pause()
+        viewModelScope.launch {
+            slideshowRepository.clear()
+            _state.value = SlideshowState.EMPTY
+            val settingsResult = settingsRepository.loadSlideshowSettings()
+            val settings = (settingsResult as? Result.Success)?.data ?: SlideshowSettings.DEFAULT
+            _state.update { it.copy(
+                transitionType = settings.transitionType,
+                displayIntervalMillis = settings.displayIntervalMillis,
+                panAnimationEnabled = settings.panAnimationEnabled
+            ) }
+            initialize(shuffleEnabled = settings.shuffleEnabled, autoPlay = true)
+        }
+    }
+
     /**
      * Clears the slideshow and resets to initial state.
      *

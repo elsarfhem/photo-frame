@@ -6,6 +6,8 @@ plugins {
     id("com.google.dagger.hilt.android") version "2.51.1" apply false
     id("org.jetbrains.kotlin.kapt") version "1.9.24" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.24" apply false
+    id("com.google.gms.google-services") version "4.4.2" apply false
+    id("com.google.firebase.crashlytics") version "3.0.2" apply false
     id("pl.allegro.tech.build.axion-release") version "1.17.2"
 }
 
@@ -42,24 +44,22 @@ scmVersion {
 val releaseVersion = scmVersion.version
 project.version = releaseVersion
 
-// Calculate versionCode from semantic version
-// Format: Major * 10000 + Minor * 100 + Patch
-// Example: 1.2.3 -> 10203
-fun semanticVersionToCode(version: String): Int {
-    val versionPattern = Regex("""(\d+)\.(\d+)\.(\d+)""")
-    val match = versionPattern.find(version.split("-")[0]) // Remove -SNAPSHOT suffix
-    return if (match != null) {
-        val (major, minor, patch) = match.destructured
-        major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt()
-    } else {
-        1 // Fallback
-    }
+// Calculate versionCode from git commit count (auto-increments with every commit)
+// Offset ensures it's higher than any previously uploaded version code (10003)
+fun gitCommitCount(): Int {
+    val process = ProcessBuilder("git", "rev-list", "--count", "HEAD")
+        .directory(projectDir)
+        .redirectErrorStream(true)
+        .start()
+    val count = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 0
+    process.waitFor()
+    return count + 10000
 }
 
 // Make version info available to app module
 ext {
     set("appVersionName", releaseVersion)
-    set("appVersionCode", semanticVersionToCode(releaseVersion))
+    set("appVersionCode", gitCommitCount())
 }
 
 // Configure Java toolchain to use JDK 17 for KAPT compatibility

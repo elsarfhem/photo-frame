@@ -88,10 +88,18 @@ import kotlin.math.abs
 @Composable
 fun SlideshowScreen(
     viewModel: SlideshowViewModel = hiltViewModel(),
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToSettings: () -> Unit = {},
+    reloadTrigger: Int = 0
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // Reload photos when returning from settings (reloadTrigger > 0 means we navigated back)
+    LaunchedEffect(reloadTrigger) {
+        if (reloadTrigger > 0) {
+            viewModel.reload()
+        }
+    }
 
     // Hoist isPlaying as a Compose snapshot state for synchronous UI updates.
     // StateFlow → collectAsState is async, so the overlay could show a stale icon
