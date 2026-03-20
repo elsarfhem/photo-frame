@@ -1,11 +1,12 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
-    id("com.android.application") version "8.2.0" apply false
-    id("com.android.library") version "8.2.0" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+    id("com.android.application") version "8.13.2" apply false
+    id("com.android.library") version "8.13.2" apply false
+    id("org.jetbrains.kotlin.android") version "2.0.20" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.20" apply false
     id("com.google.dagger.hilt.android") version "2.51.1" apply false
-    id("org.jetbrains.kotlin.kapt") version "1.9.24" apply false
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.24" apply false
+    id("com.google.devtools.ksp") version "2.0.20-1.0.25" apply false
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.0.20" apply false
     id("com.google.gms.google-services") version "4.4.2" apply false
     id("com.google.firebase.crashlytics") version "3.0.2" apply false
     id("pl.allegro.tech.build.axion-release") version "1.17.2"
@@ -62,12 +63,8 @@ ext {
     set("appVersionCode", gitCommitCount())
 }
 
-// Configure Java toolchain to use JDK 17 for KAPT compatibility
+// Configure Kotlin JVM target for all subprojects
 allprojects {
-    tasks.withType<JavaCompile>().configureEach {
-        options.release.set(17)
-    }
-
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         kotlinOptions {
             jvmTarget = "17"
