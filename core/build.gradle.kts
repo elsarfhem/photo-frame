@@ -50,7 +50,7 @@ dependencies {
     implementation("eu.agno3.jcifs:jcifs-ng:2.1.10")
 
     // Coil for image loading
-    implementation("io.coil-kt:coil:2.7.0")
+    implementation("io.coil-kt.coil3:coil:3.1.0")
 
     // EXIF orientation support for RAW image decoding
     implementation("androidx.exifinterface:exifinterface:1.4.0")

@@ -2,20 +2,23 @@ package com.photoframe.core.image
 
 import android.content.Context
 import android.graphics.Bitmap
-import coil.ImageLoader
-import coil.decode.BitmapFactoryDecoder
-import coil.disk.DiskCache
-import coil.memory.MemoryCache
-import coil.request.ErrorResult
-import coil.request.ImageRequest
-import coil.request.SuccessResult
-import coil.size.Size
+import coil3.ImageLoader
+import coil3.disk.DiskCache
+import coil3.memory.MemoryCache
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.request.bitmapConfig
+import coil3.toBitmap
 import com.photoframe.core.di.IoDispatcher
 import com.photoframe.core.model.Result
 import com.photoframe.core.smb.SmbClient
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import okio.Path.Companion.toOkioPath
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,28 +54,49 @@ class ImageCache @Inject constructor(
      * Coil ImageLoader configured for photo frame requirements.
      */
     private val imageLoader: ImageLoader by lazy {
+        // One-time disk cache clear on Coil 3 migration to avoid format incompatibilities
+        clearDiskCacheOnMigration()
+
         ImageLoader.Builder(context)
             // Memory cache configuration (50MB)
             .memoryCache {
-                MemoryCache.Builder(context)
-                    .maxSizeBytes(MEMORY_CACHE_SIZE_BYTES.toInt())
+                MemoryCache.Builder()
+                    .maxSizeBytes(MEMORY_CACHE_SIZE_BYTES)
                     .build()
             }
             // Disk cache configuration (100MB)
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("image_cache"))
+                    .directory(context.cacheDir.resolve("image_cache").toOkioPath())
                     .maxSizeBytes(DISK_CACHE_SIZE_BYTES)
                     .build()
             }
-            // Custom components: SMB fetcher and bitmap decoder
+            // Custom components: SMB fetcher
             .components {
                 add(SmbFetcher.Factory(smbClient, ioDispatcher))
-                add(BitmapFactoryDecoder.Factory())
             }
-            // Respect cache headers (no network checks)
-            .respectCacheHeaders(false)
             .build()
+    }
+
+    /**
+     * One-time disk cache clear when migrating from Coil 2 to Coil 3.
+     * Uses SharedPreferences version flag to only run once.
+     */
+    private fun clearDiskCacheOnMigration() {
+        val prefs = context.getSharedPreferences("coil_migration", Context.MODE_PRIVATE)
+        val currentVersion = 3
+        val storedVersion = prefs.getInt("coil_cache_version", 0)
+        if (storedVersion < currentVersion) {
+            try {
+                val cacheDir = context.cacheDir.resolve("image_cache")
+                if (cacheDir.exists()) {
+                    cacheDir.deleteRecursively()
+                }
+            } catch (e: Exception) {
+                try { FirebaseCrashlytics.getInstance().recordException(e) } catch (_: Exception) {}
+            }
+            prefs.edit().putInt("coil_cache_version", currentVersion).apply()
+        }
     }
 
     /**
@@ -135,12 +159,13 @@ class ImageCache @Inject constructor(
         // Execute request
         return when (val result = imageLoader.execute(request)) {
             is SuccessResult -> {
-                val bitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                if (bitmap != null) {
+                try {
+                    val bitmap = result.image.toBitmap()
                     Result.success(bitmap)
-                } else {
+                } catch (e: Exception) {
+                    try { FirebaseCrashlytics.getInstance().recordException(e) } catch (_: Exception) {}
                     Result.error(
-                        IllegalStateException("Failed to extract bitmap from drawable"),
+                        IllegalStateException("Failed to extract bitmap from Coil 3 Image", e),
                         "Image loaded but could not extract bitmap"
                     )
                 }

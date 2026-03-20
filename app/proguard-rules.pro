@@ -24,8 +24,8 @@
     <fields>;
 }
 
-# Keep Coil image loading
--keep class coil.** { *; }
+# Keep Coil 3 image loading
+-keep class coil3.** { *; }
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
