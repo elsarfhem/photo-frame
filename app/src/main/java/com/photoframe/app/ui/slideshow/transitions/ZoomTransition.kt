@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,13 +19,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import kotlin.random.Random
 
 /**
  * Zoom (Ken Burns) transition effect for photo slideshow.
  *
  * Animation: Slow zoom with pan (Ken Burns effect)
- * - Gradually zooms in or out
+ * - Fills screen completely using ContentScale.Crop (no black bands on any aspect ratio)
+ * - Gradually zooms in or out on top of the cropped image
  * - Pans horizontally and/or vertically
  * - Creates cinematic motion
  *
@@ -33,9 +36,9 @@ import kotlin.random.Random
  * Target: 60fps
  *
  * Ken Burns Effect:
- * - Random start scale (1.0 - 1.2)
- * - Random end scale (1.0 - 1.3)
- * - Random pan direction (-50 to +50 pixels)
+ * - Random zoom direction (in or out)
+ * - Start/end scale range: 1.0 - 1.3
+ * - Random pan direction scaled to screen dimensions
  * - Smooth linear interpolation
  *
  * @param bitmap Current photo bitmap
@@ -78,55 +81,60 @@ fun ZoomTransition(
     val currentTranslationX = lerp(startTranslationX, endTranslationX, animatedProgress)
     val currentTranslationY = lerp(startTranslationY, endTranslationY, animatedProgress)
 
-    // Start new animation when photo changes
-    LaunchedEffect(photoIndex) {
-        // Reset animation
-        animationTarget = 0f
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val screenWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
+        val screenHeightPx = with(LocalDensity.current) { maxHeight.toPx() }
 
-        // Randomize animation parameters
-        startScale = Random.nextFloat() * 0.2f + 1.0f // 1.0 - 1.2
-        endScale = Random.nextFloat() * 0.3f + 1.0f // 1.0 - 1.3
+        // Scale pan range proportional to screen size for natural-looking motion
+        val panRangeX = screenWidthPx * 0.03f  // 3% of screen width
+        val panRangeY = screenHeightPx * 0.03f  // 3% of screen height
 
-        // Ensure zoom direction (always zoom in or always zoom out)
-        if (startScale > endScale) {
-            // Zoom out: start larger, end smaller
-            startScale = Random.nextFloat() * 0.3f + 1.2f // 1.2 - 1.5
-            endScale = 1.0f
-        } else {
-            // Zoom in: start smaller, end larger
-            startScale = 1.0f
-            endScale = Random.nextFloat() * 0.3f + 1.2f // 1.2 - 1.5
+        // Start new animation when photo changes
+        LaunchedEffect(photoIndex) {
+            // Reset animation
+            animationTarget = 0f
+
+            // Randomize zoom direction
+            if (Random.nextBoolean()) {
+                // Zoom in
+                startScale = 1.0f
+                endScale = Random.nextFloat() * 0.15f + 1.15f // 1.15 - 1.3
+            } else {
+                // Zoom out
+                startScale = Random.nextFloat() * 0.15f + 1.15f // 1.15 - 1.3
+                endScale = 1.0f
+            }
+
+            // Randomize pan direction (proportional to screen size)
+            startTranslationX = Random.nextFloat() * panRangeX * 2 - panRangeX
+            endTranslationX = Random.nextFloat() * panRangeX * 2 - panRangeX
+            startTranslationY = Random.nextFloat() * panRangeY * 2 - panRangeY
+            endTranslationY = Random.nextFloat() * panRangeY * 2 - panRangeY
+
+            // Start animation
+            animationTarget = 1f
         }
 
-        // Randomize pan direction (-50 to +50 pixels)
-        startTranslationX = Random.nextFloat() * 100f - 50f
-        endTranslationX = Random.nextFloat() * 100f - 50f
-        startTranslationY = Random.nextFloat() * 100f - 50f
-        endTranslationY = Random.nextFloat() * 100f - 50f
-
-        // Start animation
-        animationTarget = 1f
-    }
-
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        bitmap?.let { bmp ->
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = contentDescription,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        // Hardware-accelerated zoom and pan
-                        scaleX = currentScale
-                        scaleY = currentScale
-                        translationX = currentTranslationX
-                        translationY = currentTranslationY
-                    },
-                contentScale = ContentScale.Fit
-            )
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            bitmap?.let { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = contentDescription,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            // Hardware-accelerated zoom and pan
+                            scaleX = currentScale
+                            scaleY = currentScale
+                            translationX = currentTranslationX
+                            translationY = currentTranslationY
+                        },
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
     }
 }
