@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
@@ -108,7 +110,13 @@ fun PhotoFrameApp(
 
     NavHost(
         navController = navController,
-        startDestination = LoadingRoute
+        startDestination = LoadingRoute,
+        // Disable NavHost's default fadeIn/fadeOut transitions to avoid interfering
+        // with SlideshowScreen's own AnimatedContent photo transitions.
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
     ) {
         composable<LoadingRoute> {
             // Show nothing while loading

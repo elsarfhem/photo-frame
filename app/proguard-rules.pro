@@ -14,6 +14,10 @@
 -keep class jcifs.** { *; }
 -dontwarn jcifs.**
 
+# Keep BouncyCastle security provider (required by jcifs-ng for NTLM/MD4)
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+
 # SLF4J is used by jcifs-ng but we don't include an implementation
 # Suppress warnings for missing SLF4J implementation
 -dontwarn org.slf4j.**

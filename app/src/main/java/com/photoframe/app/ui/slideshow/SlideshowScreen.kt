@@ -446,10 +446,17 @@ private fun MediaContent(
             }
         }
 
+        // Cache bitmaps per fileName so exiting AnimatedContent slots retain their old photo.
+        // Without this, both entering and exiting slots read the same (new) rotatedBitmap
+        // from the outer scope, causing the new photo to flash before the transition animates.
+        val bitmapCache = remember { mutableMapOf<String, Bitmap?>() }
+        val currentKey = photoMetadata?.fileName ?: "empty_$photoIndex"
+        bitmapCache[currentKey] = rotatedBitmap
+
         // Animated media display with transitions
         // Use fileName as key to prevent VideoPlayer disposal during transitions
         AnimatedContent(
-            targetState = photoMetadata?.fileName ?: "empty_$photoIndex",
+            targetState = currentKey,
             transitionSpec = {
                 // No transition for videos - instant switch to prevent player disposal
                 if (photoMetadata?.isVideo == true) {
@@ -461,11 +468,13 @@ private fun MediaContent(
             modifier = Modifier.fillMaxSize(),
             label = "media_transition"
         ) { fileName ->
-            // Check if current media is a video
-            android.util.Log.d("SlideshowScreen", "Rendering media: fileName=$fileName, isVideo=${photoMetadata?.isVideo}, hasBitmap=${rotatedBitmap != null}")
+            // Look up the bitmap for THIS animation slot (entering uses new, exiting uses old)
+            val slotBitmap = bitmapCache[fileName]
 
-            if (photoMetadata?.isVideo == true) {
-                // Display video player with SMB support
+            android.util.Log.d("SlideshowScreen", "Rendering media: fileName=$fileName, isVideo=${photoMetadata?.isVideo}, hasBitmap=${slotBitmap != null}")
+
+            if (photoMetadata?.isVideo == true && fileName == currentKey) {
+                // Display video player with SMB support (only for the entering slot)
                 android.util.Log.d("SlideshowScreen", "Showing VideoPlayer for: ${photoMetadata.path}")
                 VideoPlayer(
                     videoPath = photoMetadata.path,
@@ -476,11 +485,11 @@ private fun MediaContent(
                     smbDataSourceFactory = videoPlayerViewModel.smbDataSourceFactory,
                     modifier = Modifier.fillMaxSize()
                 )
-            } else if (rotatedBitmap != null) {
+            } else if (slotBitmap != null) {
                 // Apply Ken Burns or Pan animation based on settings
                 if (transitionType == com.photoframe.core.model.TransitionType.ZOOM_KEN_BURNS) {
                     ZoomTransition(
-                        bitmap = rotatedBitmap,
+                        bitmap = slotBitmap,
                         photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
                         durationMillis = displayIntervalMillis.toInt(),
@@ -489,7 +498,7 @@ private fun MediaContent(
                 } else if (panAnimationEnabled) {
                     // Apply pan animation with crop (no black bands)
                     PanTransition(
-                        bitmap = rotatedBitmap,
+                        bitmap = slotBitmap,
                         photoIndex = photoIndex,
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
                         durationMillis = displayIntervalMillis.toInt(),
@@ -498,7 +507,7 @@ private fun MediaContent(
                 } else {
                     // Display photo with standard scale (letterbox/pillarbox)
                     Image(
-                        bitmap = rotatedBitmap.asImageBitmap(),
+                        bitmap = slotBitmap.asImageBitmap(),
                         contentDescription = "Photo ${photoIndex + 1} of $totalPhotos",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit // Scale-to-fit, preserves aspect ratio
@@ -507,7 +516,7 @@ private fun MediaContent(
 
             } else {
                 // Neither video nor valid bitmap - black screen
-                android.util.Log.w("SlideshowScreen", "BLACK SCREEN: No content to render. isVideo=${photoMetadata?.isVideo}, hasBitmap=${rotatedBitmap != null}")
+                android.util.Log.w("SlideshowScreen", "BLACK SCREEN: No content to render. isVideo=${photoMetadata?.isVideo}, hasBitmap=${slotBitmap != null}")
             }
         }
 

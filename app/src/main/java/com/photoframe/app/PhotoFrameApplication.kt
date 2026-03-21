@@ -17,6 +17,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.components.SingletonComponent
+import java.security.Security
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -48,6 +49,17 @@ class PhotoFrameApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Register BouncyCastle security provider for jcifs-ng NTLM/MD4 support.
+        // Required on physical devices where Android's built-in BC provider lacks MD4.
+        try {
+            val bcProvider = Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider")
+                .getDeclaredConstructor().newInstance() as java.security.Provider
+            Security.removeProvider("BC")
+            Security.insertProviderAt(bcProvider, 1)
+        } catch (_: Exception) {
+            // BouncyCastle not available — SMB auth will fall back or fail gracefully
+        }
 
         // P0 BLOCKING: Install crash handler for auto-restart on crash
         // Addresses: "No mechanism to recover from crash/ANR - device becomes bricked"
