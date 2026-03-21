@@ -1,7 +1,11 @@
 package com.photoframe.app.ui.slideshow
 
 import android.graphics.Bitmap
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.view.HapticFeedbackConstants
+import android.widget.Toast
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
@@ -16,6 +20,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -34,6 +39,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
@@ -57,6 +63,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -67,6 +75,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.photoframe.app.ui.slideshow.transitions.PanTransition
 import com.photoframe.app.ui.slideshow.transitions.ZoomTransition
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 
 /**
@@ -527,9 +538,18 @@ private fun MediaContent(
                 photoIndex = photoIndex,
                 totalPhotos = totalPhotos,
                 isVideo = photoMetadata?.isVideo == true,
+                photoMetadata = photoMetadata,
                 onNavigateToSettings = onNavigateToSettings,
                 onRotateClockwise = onRotateClockwise,
-                onRotateCounterClockwise = onRotateCounterClockwise
+                onRotateCounterClockwise = onRotateCounterClockwise,
+                onFolderClick = { folderUri ->
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(folderUri))
+                        view.context.startActivity(intent)
+                    } catch (_: ActivityNotFoundException) {
+                        Toast.makeText(view.context, "No file manager available", Toast.LENGTH_SHORT).show()
+                    }
+                }
             )
         }
     }
@@ -544,9 +564,11 @@ private fun ControlOverlay(
     photoIndex: Int,
     totalPhotos: Int,
     isVideo: Boolean = false,
+    photoMetadata: com.photoframe.core.model.Photo? = null,
     onNavigateToSettings: () -> Unit = {},
     onRotateClockwise: () -> Unit = {},
-    onRotateCounterClockwise: () -> Unit = {}
+    onRotateCounterClockwise: () -> Unit = {},
+    onFolderClick: (String) -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -640,16 +662,82 @@ private fun ControlOverlay(
             )
         }
 
-        // Photo counter at bottom
-        Text(
-            text = "${photoIndex + 1} / $totalPhotos",
+        // Photo info + counter at bottom
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp),
-            style = MaterialTheme.typography.headlineMedium,
-            color = Color.White
-        )
+                .padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Photo/video metadata info
+            if (photoMetadata != null) {
+                Text(
+                    text = photoMetadata.fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+                val folderUri = photoMetadata.path.substringBeforeLast('/')
+                val folderDisplay = folderUri.removePrefix("smb://")
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 32.dp)
+                        .clickable { onFolderClick(folderUri) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.FolderOpen,
+                        contentDescription = "Open folder",
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.White.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = folderDisplay,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            textDecoration = TextDecoration.Underline
+                        ),
+                        color = Color.White.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                val sizeStr = formatFileSize(photoMetadata.fileSize)
+                val dateStr = formatDate(photoMetadata.lastModified)
+                Text(
+                    text = "$sizeStr  |  $dateStr",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.5f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Photo counter
+            Text(
+                text = "${photoIndex + 1} / $totalPhotos",
+                style = MaterialTheme.typography.headlineMedium,
+                color = Color.White
+            )
+        }
     }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes >= 1_073_741_824 -> String.format("%.1f GB", bytes / 1_073_741_824.0)
+        bytes >= 1_048_576 -> String.format("%.1f MB", bytes / 1_048_576.0)
+        bytes >= 1024 -> String.format("%.0f KB", bytes / 1024.0)
+        else -> "$bytes B"
+    }
+}
+
+private val dateFormatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+
+private fun formatDate(epochMillis: Long): String {
+    if (epochMillis <= 0) return ""
+    return dateFormatter.format(Date(epochMillis))
 }
 
 /**
