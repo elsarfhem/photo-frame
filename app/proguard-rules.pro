@@ -14,6 +14,10 @@
 -keep class jcifs.** { *; }
 -dontwarn jcifs.**
 
+# Keep BouncyCastle security provider (required by jcifs-ng for NTLM/MD4)
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+
 # SLF4J is used by jcifs-ng but we don't include an implementation
 # Suppress warnings for missing SLF4J implementation
 -dontwarn org.slf4j.**
@@ -24,8 +28,8 @@
     <fields>;
 }
 
-# Keep Coil image loading
--keep class coil.** { *; }
+# Keep Coil 3 image loading
+-keep class coil3.** { *; }
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.

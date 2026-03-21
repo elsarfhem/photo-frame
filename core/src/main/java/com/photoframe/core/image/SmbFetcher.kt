@@ -1,18 +1,18 @@
 package com.photoframe.core.image
 
-import android.net.Uri
-import coil.ImageLoader
-import coil.decode.DataSource
-import coil.decode.ImageSource
-import coil.fetch.FetchResult
-import coil.fetch.Fetcher
-import coil.fetch.SourceResult
-import coil.request.Options
+import coil3.ImageLoader
+import coil3.decode.DataSource
+import coil3.decode.ImageSource
+import coil3.fetch.FetchResult
+import coil3.fetch.Fetcher
+import coil3.fetch.SourceFetchResult
+import coil3.request.Options
 import com.photoframe.core.model.Result
 import com.photoframe.core.smb.SmbClient
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import okio.Buffer
+import okio.FileSystem
 
 /**
  * Custom Coil Fetcher for loading images from SMB network shares.
@@ -51,10 +51,10 @@ class SmbFetcher(
                 val buffer = Buffer().write(result.data)
 
                 // Return as ImageSource for Coil to decode
-                SourceResult(
+                SourceFetchResult(
                     source = ImageSource(
                         source = buffer,
-                        context = options.context
+                        fileSystem = FileSystem.SYSTEM
                     ),
                     mimeType = getMimeTypeFromPath(path),
                     dataSource = DataSource.NETWORK
@@ -95,7 +95,7 @@ class SmbFetcher(
     class Factory(
         private val smbClient: SmbClient,
         private val ioDispatcher: CoroutineDispatcher
-    ) : Fetcher.Factory<Uri> {
+    ) : Fetcher.Factory<coil3.Uri> {
 
         /**
          * Creates a Fetcher if the data is an SMB URL.
@@ -105,7 +105,7 @@ class SmbFetcher(
          * @param imageLoader ImageLoader instance
          * @return SmbFetcher if data is SMB URL, null otherwise
          */
-        override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
+        override fun create(data: coil3.Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
             android.util.Log.d("SmbFetcher.Factory", "create() called with URI: $data (scheme: ${data.scheme})")
             // Only handle SMB URLs
             return if (data.scheme?.equals("smb", ignoreCase = true) == true) {

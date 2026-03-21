@@ -33,9 +33,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 }
 
 dependencies {
@@ -53,7 +50,7 @@ dependencies {
     implementation("eu.agno3.jcifs:jcifs-ng:2.1.10")
 
     // Coil for image loading
-    implementation("io.coil-kt:coil:2.7.0")
+    implementation("io.coil-kt.coil3:coil:3.1.0")
 
     // EXIF orientation support for RAW image decoding
     implementation("androidx.exifinterface:exifinterface:1.4.0")
@@ -73,8 +70,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     // Hilt dependency injection
-    implementation("com.google.dagger:hilt-android:2.51.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    implementation("com.google.dagger:hilt-android:2.53.1")
+    ksp("com.google.dagger:hilt-android-compiler:2.53.1")
 
     // Hilt WorkManager integration
     implementation("androidx.hilt:hilt-work:1.2.0")

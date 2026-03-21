@@ -13,5 +13,9 @@
 # Keep jcifs-ng SMB library
 -keep class jcifs.** { *; }
 -dontwarn jcifs.**
+
+# Keep BouncyCastle security provider (required by jcifs-ng for NTLM/MD4)
+-keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
+
 -dontwarn org.slf4j.**
