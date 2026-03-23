@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Frame - Privacy Policy</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 24px;
+            line-height: 1.6;
+            color: #333;
+            background: #fafafa;
+        }
+        h1 { color: #1a1a1a; border-bottom: 2px solid #e0e0e0; padding-bottom: 12px; }
+        h2 { color: #444; margin-top: 32px; }
+        .updated { color: #888; font-size: 0.9em; }
+        a { color: #1976d2; }
+    </style>
+</head>
+<body>
+    <h1>Photo Frame - Privacy Policy</h1>
+    <p class="updated">Last updated: March 22, 2026</p>
+
+    <h2>Overview</h2>
+    <p>Photo Frame is an Android application that displays photos and videos as a digital photo frame. Your privacy is important to us. This policy explains what data the app accesses and how it is handled.</p>
+
+    <h2>Data Collection</h2>
+    <p><strong>Photo Frame does not collect, store, or transmit any personal data to external servers.</strong></p>
+    <p>The app operates entirely on your local network and device. No user accounts are required.</p>
+
+    <h2>Network Access</h2>
+    <p>The app connects to SMB (Samba) network shares on your local network to load photos and videos. These connections are made directly between your device and your network storage. No data is routed through any third-party servers.</p>
+
+    <h2>Local Storage</h2>
+    <p>The app stores the following data locally on your device:</p>
+    <ul>
+        <li><strong>Settings</strong>: slideshow preferences (display interval, transition type, etc.)</li>
+        <li><strong>SMB credentials</strong>: server address, username, and password for your network shares, stored securely in Android Keystore</li>
+        <li><strong>Photo cache</strong>: temporary cached copies of photos for faster display</li>
+        <li><strong>Photo rotation</strong>: per-photo rotation preferences</li>
+    </ul>
+    <p>All local data can be cleared by uninstalling the app or clearing app data in Android settings.</p>
+
+    <h2>Crash Reporting</h2>
+    <p>The app uses Firebase Crashlytics to collect anonymous crash reports. These reports contain:</p>
+    <ul>
+        <li>Device model and OS version</li>
+        <li>Stack traces of crashes</li>
+        <li>App version information</li>
+    </ul>
+    <p>Crash reports do not contain personal information, photos, file names, or network credentials.</p>
+
+    <h2>Permissions</h2>
+    <ul>
+        <li><strong>Internet / Network</strong>: required to connect to SMB shares on your local network</li>
+        <li><strong>Storage</strong>: required to access local photo folders (if configured)</li>
+        <li><strong>Keep screen on</strong>: prevents the screen from turning off during slideshow</li>
+    </ul>
+
+    <h2>Third-Party Services</h2>
+    <p>The app uses Firebase Crashlytics (Google) for anonymous crash reporting only. No other third-party services are used. See <a href="https://firebase.google.com/support/privacy">Firebase Privacy Policy</a>.</p>
+
+    <h2>Children's Privacy</h2>
+    <p>The app does not collect any personal information and is not directed at children under 13.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>We may update this privacy policy from time to time. Changes will be posted on this page with an updated date.</p>
+
+    <h2>Contact</h2>
+    <p>If you have questions about this privacy policy, please open an issue on our <a href="https://github.com/elsarfhem/photo-frame">GitHub repository</a>.</p>
+</body>
+</html>
