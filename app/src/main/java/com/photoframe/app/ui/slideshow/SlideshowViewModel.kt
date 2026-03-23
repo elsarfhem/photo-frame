@@ -11,7 +11,6 @@ import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.MemoryMonitor
 import com.photoframe.core.reliability.MemoryState
-import com.photoframe.core.reliability.SlideshowWatchdog
 import com.photoframe.core.repository.PhotoRotationStore
 import com.photoframe.core.repository.SettingsRepository
 import com.photoframe.core.telemetry.TelemetryLogger
@@ -431,8 +430,6 @@ class SlideshowViewModel @Inject constructor(
                         delay(interval)
                     }
 
-                    startWatchdogService(interval)
-
                     // Skip advance for videos (they advance via onVideoEnded callback)
                     if (!_state.value.isPlaying) continue
                     if (_state.value.currentPhotoMetadata?.isVideo == true) continue
@@ -532,9 +529,6 @@ class SlideshowViewModel @Inject constructor(
         previousPhotoJob = null
         watchdogJob?.cancel()
         watchdogJob = null
-
-        // Phase 4: Stop watchdog service
-        stopWatchdogService()
     }
 
     fun rotateClockwise() {
@@ -744,39 +738,6 @@ class SlideshowViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Starts the watchdog service to monitor slideshow health.
-     *
-     * @param displayIntervalMs Display interval in milliseconds
-     */
-    private fun startWatchdogService(displayIntervalMs: Long) {
-        try {
-            val intent = SlideshowWatchdog.createStartIntent(context, displayIntervalMs)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("SlideshowViewModel", "Failed to start watchdog service", e)
-        }
-    }
-
-    /**
-     * Stops the watchdog service.
-     */
-    private fun stopWatchdogService() {
-        try {
-            val intent = SlideshowWatchdog.createStopIntent(context)
-            context.startService(intent)
-        } catch (e: Exception) {
-            android.util.Log.e("SlideshowViewModel", "Failed to stop watchdog service", e)
-        }
-    }
-
-    /**
-     * Cancels all jobs and stops watchdog when ViewModel is cleared.
-     */
     override fun onCleared() {
         super.onCleared()
         autoAdvanceJob?.cancel()
@@ -784,7 +745,6 @@ class SlideshowViewModel @Inject constructor(
         previousPhotoJob?.cancel()
         networkRecoveryJob?.cancel()
         watchdogJob?.cancel()
-        stopWatchdogService()
     }
 
     companion object {
