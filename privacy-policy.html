@@ -13,36 +13,37 @@
 </head>
 <body>
     <h1>Easy Photo Frame - Privacy Policy</h1>
-    <p class="updated">Last updated: March 15, 2026</p>
+    <p class="updated">Last updated: March 22, 2026</p>
 
     <h2>Overview</h2>
     <p>Easy Photo Frame is a photo slideshow application for Android. This policy describes how the app handles your data.</p>
 
     <h2>Data Collection</h2>
-    <p>Easy Photo Frame does <strong>not</strong> collect, store, or transmit any personal data to external servers. All data remains on your device.</p>
-
-    <h2>Amazon Photos Integration</h2>
-    <p>When you connect your Amazon Photos account:</p>
-    <ul>
-        <li>The app uses Login with Amazon to authenticate your account.</li>
-        <li>OAuth tokens are stored securely on your device using Android Keystore encryption.</li>
-        <li>The app accesses your Amazon Photos albums and images solely to display them in the slideshow.</li>
-        <li>No photos or account data are uploaded, shared, or transmitted to any third party.</li>
-        <li>You can disconnect your Amazon account at any time from the app settings, which deletes all stored tokens.</li>
-    </ul>
+    <p>Easy Photo Frame does <strong>not</strong> collect, store, or transmit any personal data to external servers. All data remains on your device and local network.</p>
 
     <h2>Network Access</h2>
-    <p>The app accesses your local network (SMB shares) and Amazon Photos API exclusively to retrieve photos for display. No data is sent to any analytics, advertising, or tracking services.</p>
+    <p>The app connects to SMB (Samba) network shares on your local network to load photos and videos. These connections are made directly between your device and your network storage. No data is routed through any third-party servers.</p>
+
+    <h2>Local Storage</h2>
+    <p>The app stores the following data locally on your device:</p>
+    <ul>
+        <li><strong>Settings</strong>: slideshow preferences (display interval, transition type, etc.)</li>
+        <li><strong>SMB credentials</strong>: server address, username, and password for your network shares, stored securely using Android Keystore encryption.</li>
+        <li><strong>Photo cache</strong>: temporary cached copies of photos for faster display.</li>
+        <li><strong>Photo rotation</strong>: per-photo rotation preferences.</li>
+    </ul>
+    <p>All local data can be cleared by uninstalling the app or clearing app data in Android settings.</p>
+
+    <h2>Crash Reporting</h2>
+    <p>The app uses Firebase Crashlytics to collect anonymous crash reports. These reports contain device model, OS version, stack traces, and app version. They do <strong>not</strong> contain personal information, photos, filenames, or network credentials. See <a href="https://firebase.google.com/support/privacy">Firebase Privacy Policy</a>.</p>
 
     <h2>Permissions</h2>
     <ul>
-        <li><strong>Internet</strong>: Required to connect to Amazon Photos and SMB network shares.</li>
-        <li><strong>Network State</strong>: Used to detect connectivity changes.</li>
-        <li><strong>Wake Lock</strong>: Keeps the screen on during slideshow playback.</li>
+        <li><strong>Internet / Network</strong>: required to connect to SMB shares on your local network.</li>
+        <li><strong>Network State</strong>: used to detect connectivity changes.</li>
+        <li><strong>Wake Lock</strong>: keeps the screen on during slideshow playback.</li>
+        <li><strong>Storage</strong>: required to access local photo folders (if configured).</li>
     </ul>
-
-    <h2>Data Storage</h2>
-    <p>All app data (settings, cached images, authentication tokens) is stored locally on your device. No cloud backup of app data is performed by the app itself.</p>
 
     <h2>Children's Privacy</h2>
     <p>This app does not knowingly collect data from children under 13.</p>
