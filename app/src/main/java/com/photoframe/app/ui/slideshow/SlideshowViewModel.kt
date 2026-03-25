@@ -106,6 +106,9 @@ class SlideshowViewModel @Inject constructor(
     // In-process watchdog
     private var watchdogJob: Job? = null
 
+    // Initialization timeout watchdog (P1 fix)
+    private var initializationTimeoutJob: Job? = null
+
     @Volatile
     private var lastSuccessfulAdvanceMs: Long = 0L
 
@@ -269,6 +272,9 @@ class SlideshowViewModel @Inject constructor(
      * - When network lost: Continue with buffered photos, show warning
      * - When network restored: Auto-reconnect and resume loading
      * - Automatic retry every 30 seconds while disconnected
+     *
+     * P0 PART 3: Auto-initialize on network restore if in error state
+     * P2: Uses isRetry=true to show "Retrying..." state in UI
      */
     private fun handleNetworkStateChange(isAvailable: Boolean) {
         if (!isAvailable) {
@@ -297,14 +303,22 @@ class SlideshowViewModel @Inject constructor(
                 networkRecoveryJob?.cancel()
                 networkRecoveryJob = null
 
-                // Clear error if it was network-related
+                // Clear network-related errors
                 _state.update { currentState ->
                     if (currentState.error?.contains("Network") == true ||
                         currentState.error?.contains("network") == true) {
-                        currentState.copy(error = null)
+                        currentState.copy(error = null, isRetrying = false)
                     } else {
                         currentState
                     }
+                }
+
+                // P0 PART 3: Auto-retry initialize() if we're in error state at startup
+                // This fixes the scenario: network unavailable at boot → error shown → network comes back later
+                // P2: Pass isRetry=true to show "Retrying..." state in UI
+                if (isInitialized && _state.value.error != null && _state.value.totalPhotos == 0) {
+                    android.util.Log.i("SlideshowViewModel", "Network restored during startup error, auto-retrying initialize()")
+                    initialize(shuffleEnabled = false, autoPlay = true, isRetry = true)
                 }
             }
         }
@@ -361,39 +375,133 @@ class SlideshowViewModel @Inject constructor(
     /**
      * Initializes the slideshow by loading photos from all sources.
      *
+     * P0 FIX: Adds exponential backoff retry for transient SMB failures.
+     * - Retries with 2s, 4s, 8s delays on transient errors (timeout, connection, network)
+     * - Includes network gate: skips SMB if WiFi not ready (fast-fail vs socket timeout)
+     * - Only shows persistent errors (auth, path) to user
+     *
+     * P1 FIX: Adds initialization timeout watchdog.
+     * - If initialize() doesn't complete within 60s, forces a retry
+     * - Prevents app from getting stuck on loading screen indefinitely
+     *
+     * P2 FIX: Adds isRetrying flag for UI feedback.
+     * - Shows "Retrying..." state when timeout or network recovery triggers auto-retry
+     * - Helps user understand app is not frozen, just recovering
+     *
      * Thread Safety: Safe to call from main thread.
      *
      * @param shuffleEnabled If true, shuffles photos after loading
      * @param autoPlay If true, starts auto-play after successful loading
+     * @param isRetry If true, indicates this is a retry attempt (used to set isRetrying flag)
      */
-    fun initialize(shuffleEnabled: Boolean = false, autoPlay: Boolean = false) {
+    fun initialize(shuffleEnabled: Boolean = false, autoPlay: Boolean = false, isRetry: Boolean = false) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            // P2: Set isRetrying if this is an auto-retry (timeout or network recovery)
+            _state.update { it.copy(
+                isLoading = true,
+                isRetrying = isRetry,
+                error = if (isRetry) "Retrying..." else null
+            ) }
 
-            val result = slideshowRepository.loadPhotos(shuffleEnabled)
-            when (result) {
-                is Result.Success -> {
-                    // Update metadata
-                    val metadata = slideshowRepository.getCurrentPhotoMetadata()
+            // P1: Start initialization timeout watchdog
+            val initializationStartTime = System.currentTimeMillis()
+            initializationTimeoutJob?.cancel()
+            initializationTimeoutJob = viewModelScope.launch {
+                delay(INITIALIZATION_TIMEOUT_MS)
+                
+                // Check if initialization is still ongoing
+                if (_state.value.isLoading && _state.value.totalPhotos == 0) {
+                    android.util.Log.w("SlideshowViewModel", "INITIALIZATION TIMEOUT: No progress after ${INITIALIZATION_TIMEOUT_MS}ms, forcing retry")
                     _state.update { it.copy(
-                        currentPhotoMetadata = metadata,
                         isLoading = false,
-                        error = null
+                        error = "Initialization timed out, retrying..."
                     ) }
+                    telemetryLogger.logInitializationTimeout()
+                    
+                    // Force a retry after a brief delay
+                    delay(1000L)
+                    initialize(shuffleEnabled = shuffleEnabled, autoPlay = autoPlay, isRetry = true)
+                }
+            }
 
-                    // Start auto-play if requested and loading succeeded
-                    if (autoPlay) {
-                        play()
+            val backoffDelays = listOf(2000L, 4000L, 8000L) // 2s, 4s, 8s
+            var attempt = 0
+
+            while (attempt <= backoffDelays.size) {
+                // Part 1: Network gate - skip SMB if WiFi not ready (fast-fail)
+                if (!networkMonitor.isNetworkAvailable.value) {
+                    android.util.Log.d("SlideshowViewModel", "Network not available, retrying after delay...")
+                    if (attempt < backoffDelays.size) {
+                        delay(backoffDelays[attempt])
+                        attempt++
+                        continue
+                    } else {
+                        _state.update { it.copy(
+                            isLoading = false,
+                            isRetrying = false,
+                            error = "Network not available after retries"
+                        ) }
+                        initializationTimeoutJob?.cancel()
+                        return@launch
                     }
                 }
-                is Result.Error -> {
-                    _state.update { it.copy(
-                        isLoading = false,
-                        error = result.message ?: "Failed to load photos"
-                    ) }
-                }
-                is Result.Loading -> {
-                    // Should not happen
+
+                // Part 2: Attempt to load photos
+                val result = slideshowRepository.loadPhotos(shuffleEnabled)
+                when (result) {
+                    is Result.Success -> {
+                        // Update metadata
+                        val metadata = slideshowRepository.getCurrentPhotoMetadata()
+                        _state.update { it.copy(
+                            currentPhotoMetadata = metadata,
+                            isLoading = false,
+                            isRetrying = false,
+                            error = null
+                        ) }
+
+                        // Cancel timeout watchdog on success
+                        initializationTimeoutJob?.cancel()
+                        initializationTimeoutJob = null
+
+                        // Start auto-play if requested and loading succeeded
+                        if (autoPlay) {
+                            play()
+                        }
+                        return@launch
+                    }
+                    is Result.Error -> {
+                        val errorMsg = result.message ?: "Failed to load photos"
+                        val isTransient = errorMsg.contains(Regex("timeout|connection|refused|network|socket", RegexOption.IGNORE_CASE))
+
+                        if (isTransient && attempt < backoffDelays.size) {
+                            // Transient error - retry with backoff
+                            android.util.Log.d("SlideshowViewModel", "Transient error (attempt ${attempt + 1}/3): $errorMsg. Retrying in ${backoffDelays[attempt]}ms...")
+                            delay(backoffDelays[attempt])
+                            attempt++
+                        } else {
+                            // Persistent error or exhausted retries - show to user
+                            val finalError = if (attempt >= backoffDelays.size && isTransient) {
+                                "Failed to load photos after retries"
+                            } else {
+                                errorMsg
+                            }
+                            _state.update { it.copy(
+                                isLoading = false,
+                                isRetrying = false,
+                                error = finalError
+                            ) }
+                            android.util.Log.e("SlideshowViewModel", "Initialization failed: $finalError")
+                            
+                            // Cancel timeout watchdog on final error
+                            initializationTimeoutJob?.cancel()
+                            initializationTimeoutJob = null
+                            
+                            return@launch
+                        }
+                    }
+                    is Result.Loading -> {
+                        // Should not happen
+                    }
                 }
             }
         }
@@ -488,6 +596,10 @@ class SlideshowViewModel @Inject constructor(
                 delay(WATCHDOG_CHECK_INTERVAL_MS)
 
                 if (!_state.value.isPlaying) continue
+
+                // Don't trigger stall detection during video playback —
+                // videos advance via onVideoEnded callback, not the auto-advance timer
+                if (_state.value.currentPhotoMetadata?.isVideo == true) continue
 
                 val interval = _state.value.displayIntervalMillis
                 val stallThreshold = interval * 2 + WATCHDOG_GRACE_MS
@@ -706,7 +818,7 @@ class SlideshowViewModel @Inject constructor(
      * Thread Safety: Safe to call from main thread.
      */
     fun retry() {
-        initialize(shuffleEnabled = false)
+        initialize(shuffleEnabled = false, autoPlay = true)
     }
 
     fun reload() {
@@ -745,11 +857,13 @@ class SlideshowViewModel @Inject constructor(
         previousPhotoJob?.cancel()
         networkRecoveryJob?.cancel()
         watchdogJob?.cancel()
+        initializationTimeoutJob?.cancel()
     }
 
     companion object {
         private const val NETWORK_RETRY_INTERVAL_MS = 30_000L
         private const val WATCHDOG_CHECK_INTERVAL_MS = 5_000L
         private const val WATCHDOG_GRACE_MS = 5_000L
+        private const val INITIALIZATION_TIMEOUT_MS = 60_000L // 60 seconds
     }
 }

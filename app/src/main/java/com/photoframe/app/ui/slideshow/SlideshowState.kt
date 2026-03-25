@@ -25,6 +25,7 @@ enum class NavigationDirection {
  * @property totalPhotos Total number of photos in slideshow
  * @property isPlaying True if slideshow is auto-advancing
  * @property isLoading True if photos are being loaded
+ * @property isRetrying True if initialization is retrying after timeout or error (P2 UI feedback)
  * @property error Error message if loading failed, null otherwise
  * @property bufferedPhotosCount Number of photos currently in buffer (for debugging)
  * @property transitionType Type of transition effect between media
@@ -36,6 +37,7 @@ data class SlideshowState(
     val totalPhotos: Int = 0,
     val isPlaying: Boolean = false,
     val isLoading: Boolean = false,
+    val isRetrying: Boolean = false,
     val error: String? = null,
     val bufferedPhotosCount: Int = 0,
     val transitionType: TransitionType = TransitionType.DEFAULT,
@@ -51,13 +53,14 @@ data class SlideshowState(
     val isReady: Boolean
         get() = (currentPhoto != null || currentPhotoMetadata?.isVideo == true) &&
                 !isLoading &&
+                !isRetrying &&
                 error == null
 
     /**
      * Returns true if slideshow has photos but none are displayed.
      */
     val isEmpty: Boolean
-        get() = totalPhotos == 0 && !isLoading && error == null
+        get() = totalPhotos == 0 && !isLoading && !isRetrying && error == null
 
     /**
      * Returns true if slideshow encountered an error.

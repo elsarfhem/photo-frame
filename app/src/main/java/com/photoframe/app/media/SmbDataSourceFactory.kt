@@ -16,20 +16,12 @@ import javax.inject.Singleton
 /**
  * ExoPlayer DataSource.Factory for SMB protocol support.
  *
- * Mirrors the SmbFetcher pattern used by Coil for image loading.
- * Enables ExoPlayer to load videos directly from SMB network shares.
- *
- * Architecture:
- * - Factory creates SmbDataSource instances on-demand
- * - Each DataSource loads entire video file into memory (suitable for small videos)
- * - Uses existing SmbClient for SMB protocol handling
+ * Each DataSource downloads the video file once from SMB and caches it in memory.
+ * Subsequent ExoPlayer seek operations (close/open with DataSpec.position) are
+ * served from the cache without re-downloading.
  *
  * Limitations:
  * - Loads entire file into memory (not suitable for videos >100MB)
- * - No seek support optimization (full file read on every open)
- * - Consider chunked streaming for large videos in future
- *
- * Thread Safety: Factory is thread-safe. DataSource instances are single-use.
  *
  * @param smbClient SMB client for network file access
  * @param ioDispatcher Coroutine dispatcher for I/O operations
@@ -48,10 +40,9 @@ class SmbDataSourceFactory @Inject constructor(
 /**
  * ExoPlayer DataSource that reads video bytes from SMB shares.
  *
- * Implementation Notes:
- * - Loads entire video file on open() call
- * - Supports sequential read() operations for ExoPlayer
- * - Returns C.RESULT_END_OF_INPUT when all bytes consumed
+ * Caches the entire file in memory after the first download so that
+ * ExoPlayer's repeated close()/open() cycles for seeking don't trigger
+ * redundant SMB reads. Supports DataSpec.position for seek offsets.
  *
  * Thread Safety: Not thread-safe. ExoPlayer creates one instance per playback.
  */
@@ -63,19 +54,30 @@ private class SmbDataSource(
     private var uri: android.net.Uri? = null
     private var bytesRemaining: Long = 0
     private var opened = false
-    private var dataBytes: ByteArray? = null
     private var readPosition: Int = 0
 
-    override fun addTransferListener(transferListener: TransferListener) {
-        // TransferListener not needed for our simple implementation
-        // Could be used for tracking download progress in future
-    }
+    /** Cached file bytes — persists across close()/open() cycles for the same URI. */
+    private var cachedBytes: ByteArray? = null
+    private var cachedUri: String? = null
+
+    override fun addTransferListener(transferListener: TransferListener) {}
 
     override fun open(dataSpec: DataSpec): Long {
         uri = dataSpec.uri
         val path = uri.toString()
+        val position = dataSpec.position.toInt()
 
-        Log.d(TAG, "open: Opening SMB video: $path")
+        // Reuse cached bytes if we already downloaded this file
+        val bytes = cachedBytes
+        if (bytes != null && cachedUri == path) {
+            readPosition = position
+            bytesRemaining = (bytes.size - position).toLong()
+            opened = true
+            Log.d(TAG, "open: Serving from cache (pos=$position, remaining=$bytesRemaining)")
+            return bytesRemaining
+        }
+
+        Log.d(TAG, "open: Downloading SMB video: $path")
 
         val result = runBlocking(ioDispatcher) {
             try {
@@ -93,11 +95,12 @@ private class SmbDataSource(
 
         when (result) {
             is Result.Success -> {
-                dataBytes = result.data
-                readPosition = 0
-                bytesRemaining = dataBytes!!.size.toLong()
+                cachedBytes = result.data
+                cachedUri = path
+                readPosition = position
+                bytesRemaining = (result.data.size - position).toLong()
                 opened = true
-                Log.d(TAG, "open: Successfully loaded ${bytesRemaining} bytes")
+                Log.d(TAG, "open: Downloaded ${result.data.size} bytes, serving from pos=$position")
                 return bytesRemaining
             }
             is Result.Error -> {
@@ -114,7 +117,7 @@ private class SmbDataSource(
         if (length == 0) return 0
         if (bytesRemaining == 0L) return androidx.media3.common.C.RESULT_END_OF_INPUT
 
-        val bytes = dataBytes ?: return androidx.media3.common.C.RESULT_END_OF_INPUT
+        val bytes = cachedBytes ?: return androidx.media3.common.C.RESULT_END_OF_INPUT
         val bytesToRead = minOf(length.toLong(), bytesRemaining).toInt()
 
         System.arraycopy(bytes, readPosition, buffer, offset, bytesToRead)
@@ -127,17 +130,15 @@ private class SmbDataSource(
     override fun getUri(): android.net.Uri? = uri
 
     override fun close() {
-        uri = null
-        dataBytes = null
+        // Keep cachedBytes/cachedUri so the next open() for the same video is instant
         readPosition = 0
         bytesRemaining = 0
         opened = false
-        Log.d(TAG, "close: DataSource closed")
     }
 
     companion object {
         private const val TAG = "SmbDataSource"
-        /** Max time for open() to read the entire video file from SMB. */
-        private const val OPEN_TIMEOUT_MS = 10_000L
+        /** Max time for the initial SMB download. Generous for large video files. */
+        private const val OPEN_TIMEOUT_MS = 30_000L
     }
 }

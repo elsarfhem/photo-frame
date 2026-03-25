@@ -142,6 +142,11 @@ class TelemetryLogger @Inject constructor() {
         setCustomKey("buffer_size", bufferSize)
     }
 
+
+    fun logInitializationTimeout() {
+        logEvent("initialization_timeout", "Initialization did not complete within 60s")
+    }
+
     companion object {
         private const val TAG = "TelemetryLogger"
     }
