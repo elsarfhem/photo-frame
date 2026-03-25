@@ -208,4 +208,4 @@ private fun createExoPlayer(
 }
 
 private const val TAG = "VideoPlayer"
-private const val VIDEO_BUFFER_TIMEOUT_MS = 15_000L
+private const val VIDEO_BUFFER_TIMEOUT_MS = 60_000L
