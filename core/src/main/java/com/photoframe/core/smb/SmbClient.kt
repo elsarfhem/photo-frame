@@ -2,6 +2,7 @@ package com.photoframe.core.smb
 
 import com.photoframe.core.model.Result
 import com.photoframe.core.model.SmbConnection
+import java.io.File
 
 /**
  * Interface for SMB/Samba client operations.
@@ -48,6 +49,27 @@ interface SmbClient {
      * @return Result.Success with file bytes, Result.Error if read failed
      */
     suspend fun readFile(filePath: String): Result<ByteArray>
+
+    /**
+     * Streams an SMB file directly to a local file on disk.
+     * Unlike [readFile], this never holds the entire file in memory — suitable for large videos.
+     *
+     * @param filePath Full SMB path to file (e.g., "smb://server/share/folder/video.mp4")
+     * @param destFile Local file to write to
+     * @return Result.Success with bytes written, Result.Error if read failed
+     */
+    suspend fun readFileToFile(filePath: String, destFile: File): Result<Long> {
+        // Default fallback: read to memory then write to file.
+        // JcifsSmbClient overrides with true streaming.
+        return when (val result = readFile(filePath)) {
+            is Result.Success -> {
+                destFile.writeBytes(result.data)
+                Result.success(result.data.size.toLong())
+            }
+            is Result.Error -> Result.error(result.exception, result.message)
+            is Result.Loading -> Result.loading()
+        }
+    }
 
     /**
      * Tests the SMB connection without fully connecting.
