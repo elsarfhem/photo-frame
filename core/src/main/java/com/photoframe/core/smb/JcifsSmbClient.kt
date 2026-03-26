@@ -15,6 +15,8 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.Properties
@@ -275,6 +277,69 @@ class JcifsSmbClient(
         } catch (e: IOException) {
             Result.error(e, "Network error: ${e.message}")
         } catch (e: Exception) {
+            Result.error(e, "Failed to read file: ${e.message}")
+        }
+    }
+
+    /**
+     * Streams an SMB file directly to a local file without holding it in memory.
+     * Uses the same chunked read approach as [readFile] but writes to disk.
+     */
+    override suspend fun readFileToFile(filePath: String, destFile: File): Result<Long> {
+        val context = currentContext
+            ?: return Result.error(
+                IllegalStateException("Not connected"),
+                "Must call connect() before reading files"
+            )
+
+        return try {
+            runInterruptible(ioDispatcher) {
+                val smbFile = JcifsSmbFile(filePath, context)
+
+                if (!smbFile.exists()) {
+                    return@runInterruptible Result.error(
+                        IOException("File not found: $filePath"),
+                        "File does not exist"
+                    )
+                }
+
+                if (smbFile.isDirectory) {
+                    return@runInterruptible Result.error(
+                        IOException("Path is a directory: $filePath"),
+                        "Path must be a file"
+                    )
+                }
+
+                smbFile.inputStream.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        val chunk = ByteArray(READ_CHUNK_BYTES)
+                        var totalBytes = 0L
+                        var bytesRead: Int
+
+                        while (input.read(chunk).also { bytesRead = it } != -1) {
+                            if (Thread.interrupted()) {
+                                throw InterruptedIOException("SMB read interrupted")
+                            }
+                            output.write(chunk, 0, bytesRead)
+                            totalBytes += bytesRead
+                        }
+
+                        Result.success(totalBytes)
+                    }
+                }
+            }
+        } catch (e: InterruptedIOException) {
+            Log.d(TAG, "readFileToFile interrupted (coroutine cancelled): $filePath")
+            destFile.delete()
+            Result.error(e, "Read cancelled")
+        } catch (e: SmbException) {
+            destFile.delete()
+            Result.error(e, mapSmbExceptionMessage(e))
+        } catch (e: IOException) {
+            destFile.delete()
+            Result.error(e, "Network error: ${e.message}")
+        } catch (e: Exception) {
+            destFile.delete()
             Result.error(e, "Failed to read file: ${e.message}")
         }
     }
