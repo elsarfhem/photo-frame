@@ -11,9 +11,8 @@
 
 ## Build Stack
 
-AGP 8.13.2 | Kotlin 2.1.10 | KSP 2.1.10-1.0.29 | Gradle 8.13 | JDK 21 | minSdk 23 | compileSdk 35
-Compose BOM 2024.09.00 | Firebase BOM 33.8.0 | Hilt 2.53.1 | Coil 3.1.0 | Nav Compose 2.8.9
-axion-release for semantic versioning
+AGP 9.1.0 | Kotlin 2.2.10 | KSP 2.3.6 | Gradle 9.3.1 | JDK 21 | minSdk 23 | compileSdk 35
+Compose BOM 2024.09.00 | Firebase BOM 33.8.0 | Hilt 2.59.2 | Room 2.7.2 | axion-release 1.21.1
 
 ## Architecture
 
@@ -37,7 +36,7 @@ When work is done: push branch → create PR → merge → checkout main → pul
 ## Gotchas
 
 - `extractNativeLibs="true"` in AndroidManifest — required for 16KB page alignment (Play Store)
-- AGP 8.13.2 does not support `options.release.set()` — don't re-add it
+- AGP 9.1.0 does not support `options.release.set()` — don't re-add it
 - Configuration cache (`org.gradle.configuration-cache`) incompatible with git rev-list during config phase
 - APK signature mismatch after major upgrades: `adb uninstall com.photoframe.app` first
 - GitHub uses personal account (elsarfhem) — `gh` CLI won't work, use curl with PAT from remote URL

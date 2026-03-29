@@ -156,7 +156,7 @@ fun SlideshowScreen(
             }
             // Empty state
             state.isEmpty -> {
-                EmptyContent()
+                EmptyContent(onRetry = { viewModel.retry() })
             }
             // Photo/Video display
             state.isReady -> {
@@ -308,7 +308,7 @@ private fun ErrorContent(
  * Empty state displayed when no photos are found.
  */
 @Composable
-private fun EmptyContent() {
+private fun EmptyContent(onRetry: () -> Unit = {}) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -328,6 +328,10 @@ private fun EmptyContent() {
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.8f)
             )
+            Spacer(modifier = Modifier.height(32.dp))
+            Button(onClick = onRetry) {
+                Text("Retry")
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.photoframe.app.BuildConfig
 import com.photoframe.core.model.TransitionType
 
@@ -95,6 +96,12 @@ fun SettingsScreen(
                 onReset = viewModel::resetToDefaults,
                 onDismissSaveResult = viewModel::clearSaveResult
             )
+
+            // Debug-only: Crashlytics testing
+            if (BuildConfig.DEBUG) {
+                Divider()
+                CrashlyticsTestSection()
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -361,6 +368,58 @@ private fun formatInterval(seconds: Int): String {
         seconds == 60 -> "1 min"
         seconds < 3600 -> "${seconds / 60} min"
         else -> "${seconds / 3600} hr"
+    }
+}
+
+/**
+ * Debug-only section for testing Firebase Crashlytics integration.
+ * Provides buttons to trigger a non-fatal exception and a fatal crash.
+ */
+@Composable
+private fun CrashlyticsTestSection() {
+    var nonFatalSent by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Crashlytics Testing (Debug Only)",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { heading() }
+        )
+
+        Text(
+            text = "Use these buttons to verify that crash reports appear in the Firebase Console.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        OutlinedButton(
+            onClick = {
+                FirebaseCrashlytics.getInstance().recordException(
+                    RuntimeException("Test non-fatal exception from Settings")
+                )
+                nonFatalSent = true
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+        ) {
+            Text(if (nonFatalSent) "Non-Fatal Sent!" else "Send Non-Fatal Exception")
+        }
+
+        Button(
+            onClick = {
+                throw RuntimeException("Test fatal crash from Settings")
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+        ) {
+            Text("Force Test Crash")
+        }
     }
 }
 

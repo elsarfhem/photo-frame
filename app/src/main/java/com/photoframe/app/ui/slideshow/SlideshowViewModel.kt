@@ -11,6 +11,7 @@ import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.MemoryMonitor
 import com.photoframe.core.reliability.MemoryState
+import com.photoframe.core.reliability.SlideshowWatchdog
 import com.photoframe.core.repository.PhotoRotationStore
 import com.photoframe.core.repository.SettingsRepository
 import com.photoframe.core.telemetry.TelemetryLogger
@@ -303,6 +304,9 @@ class SlideshowViewModel @Inject constructor(
                 networkRecoveryJob?.cancel()
                 networkRecoveryJob = null
 
+                // Check if recovery is needed BEFORE clearing the error
+                val needsRecovery = isInitialized && _state.value.totalPhotos == 0
+
                 // Clear network-related errors
                 _state.update { currentState ->
                     if (currentState.error?.contains("Network") == true ||
@@ -313,11 +317,10 @@ class SlideshowViewModel @Inject constructor(
                     }
                 }
 
-                // P0 PART 3: Auto-retry initialize() if we're in error state at startup
+                // P0 PART 3: Auto-retry initialize() if we had no photos at startup
                 // This fixes the scenario: network unavailable at boot → error shown → network comes back later
-                // P2: Pass isRetry=true to show "Retrying..." state in UI
-                if (isInitialized && _state.value.error != null && _state.value.totalPhotos == 0) {
-                    android.util.Log.i("SlideshowViewModel", "Network restored during startup error, auto-retrying initialize()")
+                if (needsRecovery) {
+                    android.util.Log.i("SlideshowViewModel", "Network restored with no photos loaded, auto-retrying initialize()")
                     initialize(shuffleEnabled = false, autoPlay = true, isRetry = true)
                 }
             }
@@ -523,6 +526,7 @@ class SlideshowViewModel @Inject constructor(
         lastSuccessfulAdvanceMs = System.currentTimeMillis()
 
         startInProcessWatchdog()
+        startWatchdogService(_state.value.displayIntervalMillis)
 
         autoAdvanceJob?.cancel()
         autoAdvanceJob = viewModelScope.launch {
@@ -641,6 +645,7 @@ class SlideshowViewModel @Inject constructor(
         previousPhotoJob = null
         watchdogJob?.cancel()
         watchdogJob = null
+        stopWatchdogService()
     }
 
     fun rotateClockwise() {
@@ -858,6 +863,17 @@ class SlideshowViewModel @Inject constructor(
         networkRecoveryJob?.cancel()
         watchdogJob?.cancel()
         initializationTimeoutJob?.cancel()
+        stopWatchdogService()
+    }
+
+    private fun startWatchdogService(displayIntervalMs: Long) {
+        val intent = SlideshowWatchdog.createStartIntent(context, displayIntervalMs)
+        context.startForegroundService(intent)
+    }
+
+    private fun stopWatchdogService() {
+        val intent = SlideshowWatchdog.createStopIntent(context)
+        context.stopService(intent)
     }
 
     companion object {
