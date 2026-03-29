@@ -14,7 +14,7 @@
     <uses-permission android:name="com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE" tools:node="remove" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".PhotoFrameApplication"
@@ -44,8 +44,12 @@
         <!-- Foreground service for slideshow monitoring (prevents system kill during 24/7 operation) -->
         <service
             android:name="com.photoframe.core.reliability.SlideshowWatchdog"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="24/7 digital photo frame kiosk — monitors slideshow health and prevents process termination during continuous unattended operation" />
+        </service>
 
         <!-- Disable default WorkManager initialization for Hilt integration -->
         <provider
