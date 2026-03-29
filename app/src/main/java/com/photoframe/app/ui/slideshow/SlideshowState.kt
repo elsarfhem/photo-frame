@@ -72,6 +72,6 @@ data class SlideshowState(
         /**
          * Initial empty state.
          */
-        val EMPTY = SlideshowState()
+        val EMPTY = SlideshowState(isLoading = true)
     }
 }
