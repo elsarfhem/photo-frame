@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Frame - Foreground Service Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 24px;
+            line-height: 1.6;
+            color: #333;
+            background: #fafafa;
+        }
+        h1 { color: #1a1a1a; border-bottom: 2px solid #e0e0e0; padding-bottom: 12px; }
+        h2 { color: #444; margin-top: 32px; }
+        video { width: 100%; max-width: 720px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .section { margin-top: 24px; }
+        code { background: #e8e8e8; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Photo Frame - Foreground Service Usage</h1>
+    <p>Permission: <code>FOREGROUND_SERVICE_SPECIAL_USE</code></p>
+
+    <h2>Purpose</h2>
+    <p>Photo Frame is a <strong>24/7 digital photo frame kiosk application</strong> designed for continuous unattended operation on Android tablets. The foreground service (<code>SlideshowWatchdog</code>) serves two critical purposes:</p>
+    <ol>
+        <li><strong>Process protection</strong>: Prevents Android from terminating the app during extended operation, ensuring the photo slideshow runs uninterrupted for days or weeks.</li>
+        <li><strong>Health monitoring</strong>: Detects when the slideshow stalls (e.g., due to network issues loading photos from SMB shares) and automatically recovers by advancing to the next photo or restarting the slideshow.</li>
+    </ol>
+
+    <h2>Demo Video</h2>
+    <p>This video shows the app running a photo slideshow with the foreground service active. The notification shade is opened to show the "Photo Frame Active — Monitoring slideshow" persistent notification.</p>
+    <video controls>
+        <source src="foreground-service-demo.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+
+    <div class="section">
+        <h2>When the service runs</h2>
+        <ul>
+            <li>Started when the user presses <strong>Play</strong> to begin the slideshow</li>
+            <li>Stopped when the user presses <strong>Pause</strong> or exits the app</li>
+            <li>Only active while the slideshow is playing — never runs in the background without user intent</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>Why SPECIAL_USE</h2>
+        <p>This use case does not fit standard foreground service types. The service does not sync data, play media, track location, or connect to external devices. It monitors an on-screen slideshow for stalls and prevents process termination during kiosk-mode operation.</p>
+    </div>
+</body>
+</html>
