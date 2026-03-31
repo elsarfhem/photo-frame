@@ -130,7 +130,12 @@ class ImageCache @Inject constructor(
                 loadStandardImage(path)
             }
         } catch (e: OutOfMemoryError) {
-            // Handle OOM gracefully
+            // Log OOM to Crashlytics for diagnostics
+            FirebaseCrashlytics.getInstance().apply {
+                setCustomKey("oom_photo_path", path)
+                log("OOM while loading image: $path")
+                recordException(e)
+            }
             Result.error(
                 e,
                 "Out of memory while loading image. Image may be too large."
