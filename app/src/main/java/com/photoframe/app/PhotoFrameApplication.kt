@@ -9,6 +9,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.photoframe.core.logging.AppLogger
 import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.MemoryMonitor
 import com.photoframe.core.worker.LocalPhotoScanWorker
@@ -37,6 +38,9 @@ import javax.inject.Inject
  */
 @HiltAndroidApp
 class PhotoFrameApplication : Application(), Configuration.Provider {
+
+    @Inject
+    lateinit var appLogger: AppLogger
 
     @Inject
     lateinit var crashHandler: CrashHandler
@@ -69,6 +73,11 @@ class PhotoFrameApplication : Application(), Configuration.Provider {
         // P0 BLOCKING: Start memory monitoring to prevent OOM crashes
         // Addresses: "Memory leaks virtually guaranteed for 24/7 operation"
         memoryMonitor.startMonitoring()
+
+        // Initialize persistent diagnostic logger: capture previous session logcat first,
+        // then log APP_START so events appear in chronological order
+        appLogger.capturePreviousLogcat()
+        appLogger.log("APP_START", "v${getVersionName()}")
 
         // Multi-Source Feature: Set up background scanning for local photos
         setupLocalPhotoScanning()
@@ -135,6 +144,14 @@ class PhotoFrameApplication : Application(), Configuration.Provider {
             ExistingWorkPolicy.REPLACE,
             immediateScanRequest
         )
+    }
+
+    private fun getVersionName(): String {
+        return try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+        } catch (_: Exception) {
+            "unknown"
+        }
     }
 
     companion object {

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.photoframe.core.logging.AppLogger
 import com.photoframe.core.repository.SlideshowRepository
 import com.photoframe.core.telemetry.TelemetryLogger
 import dagger.hilt.android.AndroidEntryPoint
@@ -48,6 +49,9 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class SlideshowWatchdog : Service() {
+
+    @Inject
+    lateinit var appLogger: AppLogger
 
     @Inject
     lateinit var slideshowRepository: SlideshowRepository
@@ -116,6 +120,7 @@ class SlideshowWatchdog : Service() {
         startForeground(NOTIFICATION_ID, notification)
 
         _watchdogState.value = WatchdogState.Monitoring
+        appLogger.log("WATCHDOG_START", "interval=${displayIntervalMs}ms")
 
         // Initialize tracking
         lastPhotoChangeTime = System.currentTimeMillis()
@@ -182,6 +187,7 @@ class SlideshowWatchdog : Service() {
     private suspend fun handleStalledSlideshow() {
         android.util.Log.w(TAG, "Slideshow stall detected, attempting recovery")
         _watchdogState.value = WatchdogState.Recovering
+        appLogger.log("WATCHDOG_STALL_DETECTED", "stallDuration=${System.currentTimeMillis() - lastPhotoChangeTime}ms")
 
         // Log to Crashlytics
         val stallDurationMs = System.currentTimeMillis() - lastPhotoChangeTime

@@ -1,8 +1,10 @@
 package com.photoframe.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -10,6 +12,8 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -18,10 +22,12 @@ import com.photoframe.app.ui.slideshow.SlideshowScreen
 import com.photoframe.app.ui.sources.SourcesScreen
 import com.photoframe.app.ui.theme.PhotoFrameTheme
 import com.photoframe.core.data.PhotoSourcesManager
+import com.photoframe.core.logging.LogExporter
 import com.photoframe.core.model.Result
 import com.photoframe.core.observer.MediaStoreObserver
 import com.photoframe.core.repository.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import javax.inject.Inject
 
@@ -51,6 +57,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var photoSourcesManager: PhotoSourcesManager
 
+    @Inject
+    lateinit var logExporter: LogExporter
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -63,7 +72,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    PhotoFrameApp(settingsRepository, photoSourcesManager)
+                    TripleTapLogExport(logExporter) {
+                        PhotoFrameApp(settingsRepository, photoSourcesManager)
+                    }
                 }
             }
         }
@@ -74,6 +85,68 @@ class MainActivity : ComponentActivity() {
         mediaStoreObserver.stop()
     }
 }
+
+/**
+ * Wraps content with a triple-tap gesture detector that triggers log export.
+ * Detects 3 taps (pointer down events) within 800ms anywhere on screen.
+ *
+ * Uses PointerEventPass.Initial to OBSERVE taps without consuming them,
+ * so child composables (SlideshowScreen gestures, buttons, etc.) still receive events.
+ */
+@Composable
+fun TripleTapLogExport(
+    logExporter: LogExporter,
+    content: @Composable () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var tapCount by remember { mutableIntStateOf(0) }
+    var lastTapTime by remember { mutableLongStateOf(0L) }
+    var isExporting by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        // Observe pointer-down on Initial pass — does NOT consume the event,
+                        // so children still receive all taps/gestures normally.
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.changes.any { it.pressed && !it.previousPressed }) {
+                            val now = System.currentTimeMillis()
+                            if (now - lastTapTime > TRIPLE_TAP_WINDOW_MS) {
+                                tapCount = 1
+                            } else {
+                                tapCount++
+                            }
+                            lastTapTime = now
+
+                            if (tapCount >= 3 && !isExporting) {
+                                tapCount = 0
+                                isExporting = true
+                                coroutineScope.launch {
+                                    try {
+                                        val shareIntent = logExporter.buildShareIntent()
+                                        val chooser = Intent.createChooser(shareIntent, "Share Photo Frame Logs")
+                                        context.startActivity(chooser)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("LogExport", "Failed to share logs", e)
+                                    } finally {
+                                        isExporting = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+    ) {
+        content()
+    }
+}
+
+private const val TRIPLE_TAP_WINDOW_MS = 800L
 
 /**
  * Main app composable with navigation.
@@ -152,8 +225,13 @@ fun PhotoFrameApp(
         composable<SourcesRoute> {
             SourcesScreen(
                 onNavigateBack = {
-                    // Pop Sources, return to previous screen (Settings or Loading)
-                    navController.popBackStack()
+                    // Pop Sources, return to previous screen (Settings)
+                    // If nothing to pop (came from startup with no sources), go to Slideshow
+                    if (!navController.popBackStack()) {
+                        navController.navigate(SlideshowRoute) {
+                            popUpTo<SourcesRoute> { inclusive = true }
+                        }
+                    }
                 }
             )
         }

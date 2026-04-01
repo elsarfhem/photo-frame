@@ -51,6 +51,17 @@
                 android:value="24/7 digital photo frame kiosk — monitors slideshow health and prevents process termination during continuous unattended operation" />
         </service>
 
+        <!-- FileProvider for log export sharing -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Disable default WorkManager initialization for Hilt integration -->
         <provider
             android:name="androidx.startup.InitializationProvider"

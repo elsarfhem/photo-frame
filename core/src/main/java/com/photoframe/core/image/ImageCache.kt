@@ -12,6 +12,7 @@ import coil3.request.allowHardware
 import coil3.request.bitmapConfig
 import coil3.toBitmap
 import com.photoframe.core.di.IoDispatcher
+import com.photoframe.core.logging.AppLogger
 import com.photoframe.core.model.Result
 import com.photoframe.core.smb.SmbClient
 import com.google.firebase.crashlytics.FirebaseCrashlytics
@@ -48,7 +49,8 @@ import javax.inject.Singleton
 class ImageCache @Inject constructor(
     @ApplicationContext private val context: Context,
     private val smbClient: SmbClient,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val appLogger: AppLogger
 ) {
     /**
      * Coil ImageLoader configured for photo frame requirements.
@@ -130,7 +132,8 @@ class ImageCache @Inject constructor(
                 loadStandardImage(path)
             }
         } catch (e: OutOfMemoryError) {
-            // Log OOM to Crashlytics for diagnostics
+            // Log OOM to persistent log and Crashlytics
+            appLogger.log("OOM", "path=$path")
             FirebaseCrashlytics.getInstance().apply {
                 setCustomKey("oom_photo_path", path)
                 log("OOM while loading image: $path")
