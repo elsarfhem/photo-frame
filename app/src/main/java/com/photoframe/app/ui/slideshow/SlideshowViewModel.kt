@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.photoframe.core.logging.AppLogger
 import com.photoframe.core.model.Result
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.SlideshowSettings
@@ -75,7 +76,8 @@ class SlideshowViewModel @Inject constructor(
     private val memoryMonitor: MemoryMonitor,
     private val crashHandler: CrashHandler,
     private val telemetryLogger: TelemetryLogger,
-    private val photoRotationStore: PhotoRotationStore
+    private val photoRotationStore: PhotoRotationStore,
+    private val appLogger: AppLogger
 ) : ViewModel() {
 
     // UI state
@@ -284,6 +286,7 @@ class SlideshowViewModel @Inject constructor(
                 isNetworkDisconnected = true
                 android.util.Log.w("SlideshowViewModel", "Network disconnected, continuing with buffered photos")
                 telemetryLogger.logNetworkDisconnect()
+                appLogger.log("NETWORK_LOST")
 
                 // Show warning in UI but DON'T block isReady — use a separate warning field
                 // Note: Setting error here would make isReady=false, hiding the slideshow
@@ -299,6 +302,7 @@ class SlideshowViewModel @Inject constructor(
                 isNetworkDisconnected = false
                 android.util.Log.i("SlideshowViewModel", "Network restored, resuming normal operation")
                 telemetryLogger.logNetworkReconnect()
+                appLogger.log("NETWORK_RECOVERED")
 
                 // Stop retry job
                 networkRecoveryJob?.cancel()
@@ -357,6 +361,7 @@ class SlideshowViewModel @Inject constructor(
                 // Memory pressure detected - buffer has been reduced to minimum
                 wasMemoryCritical = true
                 android.util.Log.w("SlideshowViewModel", "Critical memory pressure: ${memoryState.usagePercent}%")
+                appLogger.log("MEMORY_WARNING", "critical ${memoryState.usagePercent.toInt()}%")
             }
             is MemoryState.Warning -> {
                 // Warning threshold - memory cache cleared but buffer intact
@@ -494,6 +499,7 @@ class SlideshowViewModel @Inject constructor(
                                 error = finalError
                             ) }
                             android.util.Log.e("SlideshowViewModel", "Initialization failed: $finalError")
+                            appLogger.log("SLIDESHOW_ERROR", finalError)
                             
                             // Cancel timeout watchdog on final error
                             initializationTimeoutJob?.cancel()
@@ -524,6 +530,7 @@ class SlideshowViewModel @Inject constructor(
 
         _state.update { it.copy(isPlaying = true) }
         lastSuccessfulAdvanceMs = System.currentTimeMillis()
+        appLogger.log("SLIDESHOW_PLAY", "photos=${_state.value.totalPhotos}")
 
         startInProcessWatchdog()
         startWatchdogService(_state.value.displayIntervalMillis)
@@ -636,6 +643,7 @@ class SlideshowViewModel @Inject constructor(
      * Thread Safety: Safe to call from main thread.
      */
     fun pause() {
+        appLogger.log("SLIDESHOW_PAUSE")
         _state.update { it.copy(isPlaying = false) }
         autoAdvanceJob?.cancel()
         autoAdvanceJob = null
@@ -856,6 +864,7 @@ class SlideshowViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        appLogger.log("SLIDESHOW_DESTROYED")
         super.onCleared()
         autoAdvanceJob?.cancel()
         nextPhotoJob?.cancel()

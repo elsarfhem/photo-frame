@@ -12,6 +12,8 @@ import com.photoframe.core.data.IncrementalPhotoLoader
 import com.photoframe.core.data.LocalPhotoDataSource
 import com.photoframe.core.data.PhotoSourcesManager
 import com.photoframe.core.data.SmbPhotoDataSource
+import com.photoframe.core.logging.AppLogger
+import com.photoframe.core.logging.LogExporter
 import com.photoframe.core.image.ImageCache
 import com.photoframe.core.observer.MediaStoreObserver
 import com.photoframe.core.network.NetworkMonitor
@@ -169,9 +171,10 @@ object CoreModule {
     fun provideImageCache(
         @ApplicationContext context: Context,
         smbClient: SmbClient,
-        @IoDispatcher ioDispatcher: CoroutineDispatcher
+        @IoDispatcher ioDispatcher: CoroutineDispatcher,
+        appLogger: AppLogger
     ): ImageCache {
-        return ImageCache(context, smbClient, ioDispatcher)
+        return ImageCache(context, smbClient, ioDispatcher, appLogger)
     }
 
     @Provides
@@ -229,6 +232,25 @@ object CoreModule {
         @IoDispatcher dispatcher: CoroutineDispatcher
     ): CrashHandler {
         return CrashHandler(context, dataStore, telemetryLogger, dispatcher)
+    }
+
+    @Provides
+    @Singleton
+    fun provideAppLogger(
+        @ApplicationContext context: Context,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
+    ): AppLogger {
+        return AppLogger(context, ioDispatcher)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLogExporter(
+        @ApplicationContext context: Context,
+        appLogger: AppLogger,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher
+    ): LogExporter {
+        return LogExporter(context, appLogger, ioDispatcher)
     }
 
     @Provides

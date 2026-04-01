@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Log export: only the diagnostic log file -->
+    <files-path name="logs" path="photoframe-diagnostic.log" />
+    <!-- Log export: only the export subdirectory -->
+    <cache-path name="exports" path="log-exports" />
+</paths>
