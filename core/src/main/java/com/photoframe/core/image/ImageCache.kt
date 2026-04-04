@@ -18,6 +18,8 @@ import com.photoframe.core.smb.SmbClient
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okio.Path.Companion.toOkioPath
 import javax.inject.Inject
@@ -52,6 +54,10 @@ class ImageCache @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val appLogger: AppLogger
 ) {
+    // Serialize SMB fetches to prevent multiple coroutines from piling up on
+    // jcifs-ng internal synchronized locks, which causes thread starvation and OOM.
+    private val smbLoadSemaphore = Semaphore(1)
+
     /**
      * Coil ImageLoader configured for photo frame requirements.
      */
@@ -122,15 +128,17 @@ class ImageCache @Inject constructor(
      */
     suspend fun load(path: String): Result<Bitmap> = withContext(ioDispatcher) {
         return@withContext try {
-            // Check if this is a RAW file
-            val extension = path.substringAfterLast('.', "")
-            if (RawImageDecoder.isRawFormat(extension)) {
-                // Load RAW file using custom decoder
-                loadRawImage(path, extension)
-            } else {
-                // Use Coil for standard formats
-                loadStandardImage(path)
+            val isSmbPath = path.startsWith("smb://")
+            val block: suspend () -> Result<Bitmap> = {
+                val extension = path.substringAfterLast('.', "")
+                if (RawImageDecoder.isRawFormat(extension)) {
+                    loadRawImage(path, extension)
+                } else {
+                    loadStandardImage(path)
+                }
             }
+            // Serialize SMB fetches to prevent jcifs lock contention
+            if (isSmbPath) smbLoadSemaphore.withPermit { block() } else block()
         } catch (e: OutOfMemoryError) {
             // Log OOM to persistent log and Crashlytics
             appLogger.log("OOM", "path=$path")

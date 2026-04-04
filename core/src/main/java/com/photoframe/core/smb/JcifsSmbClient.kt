@@ -85,6 +85,11 @@ class JcifsSmbClient(
             setProperty("jcifs.smb.client.responseTimeout", responseTimeoutMs.toString())
             setProperty("jcifs.smb.client.soTimeout", socketTimeoutMs.toString())
 
+            // Disable DFS referral resolution — NAS doesn't use DFS, but jcifs
+            // attempts a lookup on every file open, holding a global lock for ~6s on timeout.
+            // This caused cascading thread starvation and OOM kills during 24/7 operation.
+            setProperty("jcifs.smb.client.dfs.disabled", "true")
+
             // Disable DNS lookups for performance
             setProperty("jcifs.resolveOrder", "BCAST")
 

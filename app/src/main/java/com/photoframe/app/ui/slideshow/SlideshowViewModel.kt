@@ -479,7 +479,7 @@ class SlideshowViewModel @Inject constructor(
                     }
                     is Result.Error -> {
                         val errorMsg = result.message ?: "Failed to load photos"
-                        val isTransient = errorMsg.contains(Regex("timeout|connection|refused|network|socket", RegexOption.IGNORE_CASE))
+                        val isTransient = errorMsg.contains(Regex("timeout|connection|refused|network|socket|no photos found", RegexOption.IGNORE_CASE))
 
                         if (isTransient && attempt < backoffDelays.size) {
                             // Transient error - retry with backoff
