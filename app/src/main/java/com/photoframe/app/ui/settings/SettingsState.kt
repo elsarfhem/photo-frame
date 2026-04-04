@@ -45,7 +45,8 @@ data class SettingsState(
     val isSaving: Boolean = false,
     val saveResult: SaveResult? = null,
     val validationErrors: Map<String, String> = emptyMap(),
-    val isModified: Boolean = false
+    val isModified: Boolean = false,
+    val wasSaved: Boolean = false
 ) {
     companion object {
         val EMPTY = SettingsState()

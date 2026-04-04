@@ -207,12 +207,16 @@ fun PhotoFrameApp(
 
         composable<SettingsRoute> {
             SettingsScreen(
-                onNavigateBack = {
-                    // Settings changed: pop Settings + Slideshow, then navigate fresh to Slideshow.
-                    // This recreates the SlideshowViewModel so it re-reads updated settings.
-                    slideshowReloadTrigger++
-                    navController.navigate(SlideshowRoute) {
-                        popUpTo<SlideshowRoute> { inclusive = true }
+                onNavigateBack = { settingsChanged ->
+                    if (settingsChanged) {
+                        // Settings saved: recreate SlideshowRoute so ViewModel re-reads settings.
+                        slideshowReloadTrigger++
+                        navController.navigate(SlideshowRoute) {
+                            popUpTo<SlideshowRoute> { inclusive = true }
+                        }
+                    } else {
+                        // No changes: return to slideshow without reloading.
+                        navController.popBackStack()
                     }
                 },
                 onNavigateToSources = {

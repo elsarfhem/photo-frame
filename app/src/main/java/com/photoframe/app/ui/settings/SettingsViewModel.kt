@@ -261,7 +261,8 @@ class SettingsViewModel @Inject constructor(
                     )
                     is Result.Loading -> null // Should not happen
                 },
-                isModified = false
+                isModified = false,
+                wasSaved = settingsResult is Result.Success || _state.value.wasSaved
             )
         }
     }
@@ -275,7 +276,8 @@ class SettingsViewModel @Inject constructor(
             transitionType = com.photoframe.core.model.TransitionType.DEFAULT,
             shuffleEnabled = false,
             panAnimationEnabled = true,
-            isModified = true
+            isModified = true,
+            wasSaved = _state.value.wasSaved
         )
     }
 
