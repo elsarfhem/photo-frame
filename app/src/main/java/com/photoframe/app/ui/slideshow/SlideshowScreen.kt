@@ -2,6 +2,9 @@ package com.photoframe.app.ui.slideshow
 
 import android.graphics.Bitmap
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.view.HapticFeedbackConstants
@@ -547,11 +550,19 @@ private fun MediaContent(
                 onRotateClockwise = onRotateClockwise,
                 onRotateCounterClockwise = onRotateCounterClockwise,
                 onFolderClick = { folderUri ->
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(folderUri))
-                        view.context.startActivity(intent)
-                    } catch (_: ActivityNotFoundException) {
-                        Toast.makeText(view.context, "No file manager available", Toast.LENGTH_SHORT).show()
+                    if (folderUri.startsWith("smb://")) {
+                        val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Photo path", folderUri))
+                        Toast.makeText(view.context, "Path copied to clipboard", Toast.LENGTH_SHORT).show()
+                    } else {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(folderUri))
+                            view.context.startActivity(intent)
+                        } catch (_: ActivityNotFoundException) {
+                            val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Photo path", folderUri))
+                            Toast.makeText(view.context, "Path copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             )
