@@ -54,9 +54,9 @@ class ImageCache @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val appLogger: AppLogger
 ) {
-    // Serialize SMB fetches to prevent multiple coroutines from piling up on
-    // jcifs-ng internal synchronized locks, which causes thread starvation and OOM.
-    private val smbLoadSemaphore = Semaphore(1)
+    // Cap concurrent SMB fetches at 2 (one load + one prewarm) to prevent
+    // bitmap allocation pile-up that causes OOM on 512MB-heap devices.
+    private val smbLoadSemaphore = Semaphore(2)
 
     /**
      * Coil ImageLoader configured for photo frame requirements.
@@ -236,20 +236,24 @@ class ImageCache @Inject constructor(
      */
     suspend fun prewarm(path: String): Result<Unit> = withContext(ioDispatcher) {
         return@withContext try {
-            val request = ImageRequest.Builder(context)
-                .data(path)
-                .size(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
-                .allowHardware(true)
-                .bitmapConfig(Bitmap.Config.ARGB_8888)
-                .build()
+            val isSmbPath = path.startsWith("smb://")
+            val block: suspend () -> Result<Unit> = {
+                val request = ImageRequest.Builder(context)
+                    .data(path)
+                    .size(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
+                    .allowHardware(true)
+                    .bitmapConfig(Bitmap.Config.ARGB_8888)
+                    .build()
 
-            when (val result = imageLoader.execute(request)) {
-                is SuccessResult -> Result.success(Unit)
-                is ErrorResult -> Result.error(
-                    result.throwable,
-                    "Failed to prewarm image: ${result.throwable.message}"
-                )
+                when (val result = imageLoader.execute(request)) {
+                    is SuccessResult -> Result.success(Unit)
+                    is ErrorResult -> Result.error(
+                        result.throwable,
+                        "Failed to prewarm image: ${result.throwable.message}"
+                    )
+                }
             }
+            if (isSmbPath) smbLoadSemaphore.withPermit { block() } else block()
         } catch (e: Exception) {
             Result.error(e, "Failed to prewarm image: ${e.message}")
         }
