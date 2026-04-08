@@ -549,18 +549,23 @@ private fun MediaContent(
                 onNavigateToSettings = onNavigateToSettings,
                 onRotateClockwise = onRotateClockwise,
                 onRotateCounterClockwise = onRotateCounterClockwise,
-                onFolderClick = { folderUri ->
-                    if (folderUri.startsWith("smb://")) {
+                onFolderClick = { photoPath ->
+                    if (photoPath.startsWith("smb://")) {
+                        val folderPath = photoPath.substringBeforeLast('/')
                         val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Photo path", folderUri))
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Photo path", folderPath))
                         Toast.makeText(view.context, "Path copied to clipboard", Toast.LENGTH_SHORT).show()
                     } else {
                         try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(folderUri))
-                            view.context.startActivity(intent)
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "image/*"
+                                putExtra(Intent.EXTRA_STREAM, Uri.parse(photoPath))
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            view.context.startActivity(Intent.createChooser(shareIntent, "Share Photo"))
                         } catch (_: ActivityNotFoundException) {
                             val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Photo path", folderUri))
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Photo path", photoPath))
                             Toast.makeText(view.context, "Path copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -694,12 +699,11 @@ private fun ControlOverlay(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
-                val folderUri = photoMetadata.path.substringBeforeLast('/')
-                val folderDisplay = folderUri.removePrefix("smb://")
+                val folderDisplay = photoMetadata.path.substringBeforeLast('/').removePrefix("smb://")
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 32.dp)
-                        .clickable { onFolderClick(folderUri) },
+                        .clickable { onFolderClick(photoMetadata.path) },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
