@@ -856,13 +856,13 @@ class PhotoBufferManager @Inject constructor(
         private const val MIN_BUFFER_SIZE = 5
 
         /** Maximum buffer size to avoid excessive memory usage. */
-        private const val MAX_BUFFER_SIZE = 20
+        private const val MAX_BUFFER_SIZE = 8
 
         /** Estimated bytes per downsampled photo (2560x1600 ARGB_8888). */
         private const val ESTIMATED_PHOTO_BYTES = 16L * 1024 * 1024 // 16MB
 
         /** Fraction of max heap to allocate for photo buffer. */
-        private const val HEAP_FRACTION = 0.50
+        private const val HEAP_FRACTION = 0.25
 
         /**
          * Preload timeout: 5 seconds per photo.

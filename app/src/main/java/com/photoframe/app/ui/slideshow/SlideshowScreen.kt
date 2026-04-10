@@ -467,9 +467,15 @@ private fun MediaContent(
         // Cache bitmaps per fileName so exiting AnimatedContent slots retain their old photo.
         // Without this, both entering and exiting slots read the same (new) rotatedBitmap
         // from the outer scope, causing the new photo to flash before the transition animates.
+        // Bounded to 3 entries (current + entering + exiting) to prevent GPU memory exhaustion
+        // from unbounded bitmap accumulation that caused BufferQueueProducer timeouts after ~2h.
         val bitmapCache = remember { mutableMapOf<String, Bitmap?>() }
         val currentKey = photoMetadata?.fileName ?: "empty_$photoIndex"
         bitmapCache[currentKey] = rotatedBitmap
+        if (bitmapCache.size > 3) {
+            val keysToRemove = bitmapCache.keys.filter { it != currentKey }.dropLast(1)
+            keysToRemove.forEach { bitmapCache.remove(it) }
+        }
 
         // Animated media display with transitions
         // Use fileName as key to prevent VideoPlayer disposal during transitions
