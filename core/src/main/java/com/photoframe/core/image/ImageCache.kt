@@ -305,7 +305,7 @@ class ImageCache @Inject constructor(
          * Memory cache size: 50MB per ADR.
          * Holds ~3 downsampled photos in memory at 2560x1600 ARGB_8888.
          */
-        private const val MEMORY_CACHE_SIZE_BYTES = 50 * 1024 * 1024L // 50MB
+        private const val MEMORY_CACHE_SIZE_BYTES = 20 * 1024 * 1024L // 20MB
 
         /**
          * Disk cache size: 100MB per ADR.

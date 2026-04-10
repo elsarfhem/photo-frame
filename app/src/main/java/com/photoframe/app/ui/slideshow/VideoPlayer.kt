@@ -119,6 +119,9 @@ fun VideoPlayer(
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING) // Show spinner during loading
                 }
             },
+            onRelease = { playerView ->
+                playerView.player = null // Detach player before View destruction to release SurfaceView buffers
+            },
             modifier = Modifier.fillMaxSize()
         )
     }
