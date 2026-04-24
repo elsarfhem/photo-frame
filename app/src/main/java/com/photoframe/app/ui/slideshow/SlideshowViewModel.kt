@@ -438,14 +438,16 @@ class SlideshowViewModel @Inject constructor(
             val backoffDelays = listOf(2000L, 4000L, 8000L) // 2s, 4s, 8s
             var attempt = 0
 
-            // Only gate on network when SMB sources are configured.
-            // Local-only sources (MediaStore) work fully offline.
-            val hasSmbSource = photoSourcesManager.getEnabledSources()
-                .any { it.type == PhotoSourceType.SMB }
+            // Only gate on network when ALL enabled sources are SMB.
+            // If any local source exists, proceed: local photos work offline,
+            // SMB sources will fail individually and be skipped by the repository.
+            val enabledSources = photoSourcesManager.getEnabledSources()
+            val smbOnly = enabledSources.isNotEmpty() &&
+                enabledSources.all { it.type == PhotoSourceType.SMB }
 
             while (attempt <= backoffDelays.size) {
-                // Part 1: Network gate - only skip when SMB sources need network
-                if (hasSmbSource && !networkMonitor.isNetworkAvailable.value) {
+                // Part 1: Network gate - only skip when every source needs network
+                if (smbOnly && !networkMonitor.isNetworkAvailable.value) {
                     android.util.Log.d("SlideshowViewModel", "Network not available, retrying after delay...")
                     if (attempt < backoffDelays.size) {
                         delay(backoffDelays[attempt])

@@ -13,6 +13,7 @@ import com.photoframe.core.model.PhotoSourceType
 import com.photoframe.core.model.Result
 import com.photoframe.core.model.SmbConnection
 import com.photoframe.core.model.SourceConfig
+import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.security.CredentialStore
 import com.photoframe.core.slideshow.PhotoBufferManager
 import com.photoframe.core.smb.SmbClient
@@ -65,6 +66,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     private val photoDao: PhotoDao,
     private val smbClient: SmbClient,
     private val credentialStore: CredentialStore,
+    private val networkMonitor: NetworkMonitor,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : MultiSourcePhotoRepository {
 
@@ -225,6 +227,16 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                     var photoList = allCachedPhotos
                     if (shuffleEnabled) {
                         photoList = fisherYatesShuffle(photoList)
+                    }
+
+                    // When network is unavailable, prioritize local photos at the front so the
+                    // buffer can initialize successfully even if SMB photos dominate the list.
+                    if (!networkMonitor.isNetworkAvailable.value) {
+                        val (local, remote) = photoList.partition { !it.path.startsWith("smb://") }
+                        if (local.isNotEmpty()) {
+                            photoList = local + remote
+                            Log.d(TAG, "loadPhotos: Offline mode — reordered ${local.size} local photos to front")
+                        }
                     }
 
                     // Initialize buffer BEFORE setting _photos to prevent state desync
