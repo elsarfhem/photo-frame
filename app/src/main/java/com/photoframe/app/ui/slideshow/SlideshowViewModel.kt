@@ -4,9 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.photoframe.core.data.PhotoSourcesManager
 import com.photoframe.core.logging.AppLogger
 import com.photoframe.core.model.Result
 import com.photoframe.core.model.Photo
+import com.photoframe.core.model.PhotoSourceType
 import com.photoframe.core.model.SlideshowSettings
 import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
@@ -73,6 +75,7 @@ class SlideshowViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val photoBufferManager: PhotoBufferManager,
     private val networkMonitor: NetworkMonitor,
+    private val photoSourcesManager: PhotoSourcesManager,
     private val memoryMonitor: MemoryMonitor,
     private val crashHandler: CrashHandler,
     private val telemetryLogger: TelemetryLogger,
@@ -435,9 +438,14 @@ class SlideshowViewModel @Inject constructor(
             val backoffDelays = listOf(2000L, 4000L, 8000L) // 2s, 4s, 8s
             var attempt = 0
 
+            // Only gate on network when SMB sources are configured.
+            // Local-only sources (MediaStore) work fully offline.
+            val hasSmbSource = photoSourcesManager.getEnabledSources()
+                .any { it.type == PhotoSourceType.SMB }
+
             while (attempt <= backoffDelays.size) {
-                // Part 1: Network gate - skip SMB if WiFi not ready (fast-fail)
-                if (!networkMonitor.isNetworkAvailable.value) {
+                // Part 1: Network gate - only skip when SMB sources need network
+                if (hasSmbSource && !networkMonitor.isNetworkAvailable.value) {
                     android.util.Log.d("SlideshowViewModel", "Network not available, retrying after delay...")
                     if (attempt < backoffDelays.size) {
                         delay(backoffDelays[attempt])
