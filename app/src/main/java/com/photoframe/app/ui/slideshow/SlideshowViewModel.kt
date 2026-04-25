@@ -311,6 +311,10 @@ class SlideshowViewModel @Inject constructor(
                 networkRecoveryJob?.cancel()
                 networkRecoveryJob = null
 
+                // Clear blacklisted SMB paths so they get retried now that network is back.
+                // Mobile networks can be unstable — previously failed SMB photos should load again.
+                photoBufferManager.clearSmbBlacklist()
+
                 // Check if recovery is needed BEFORE clearing the error
                 val needsRecovery = isInitialized && _state.value.totalPhotos == 0
 
