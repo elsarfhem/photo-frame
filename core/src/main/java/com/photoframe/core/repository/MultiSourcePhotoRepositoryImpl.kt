@@ -229,16 +229,6 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                         photoList = fisherYatesShuffle(photoList)
                     }
 
-                    // When network is unavailable, prioritize local photos at the front so the
-                    // buffer can initialize successfully even if SMB photos dominate the list.
-                    if (!networkMonitor.isNetworkAvailable.value) {
-                        val (local, remote) = photoList.partition { !it.path.startsWith("smb://") }
-                        if (local.isNotEmpty()) {
-                            photoList = local + remote
-                            Log.d(TAG, "loadPhotos: Offline mode — reordered ${local.size} local photos to front")
-                        }
-                    }
-
                     // Initialize buffer BEFORE setting _photos to prevent state desync
                     currentIndex = 0
                     val bufferResult = photoBufferManager.initialize(photoList, currentIndex)
