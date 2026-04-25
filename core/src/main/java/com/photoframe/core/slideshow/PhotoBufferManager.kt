@@ -365,14 +365,14 @@ class PhotoBufferManager @Inject constructor(
         val timeoutPerAttempt = (displayIntervalMs / 2).coerceAtLeast(2_000L)
 
         // maxRetries counts only real I/O failures (timeout, decode error).
-        // Blacklisted skips are free (instant) and don't count — but totalSkips
-        // caps at photos.size to prevent infinite loops if everything is blacklisted.
+        // Blacklisted/offline-SMB skips are free (instant) and capped at
+        // photos.size to prevent infinite loops if every path is unreachable.
         val maxRetries = 3
         var retriesSoFar = 0
-        var totalSkips = 0
-        val maxSkips = mutex.withLock { photos.size }
+        var consecutiveSkips = 0
+        val maxConsecutiveSkips = mutex.withLock { photos.size + 1 }
 
-        while (retriesSoFar < maxRetries && totalSkips < maxSkips) {
+        while (retriesSoFar < maxRetries && consecutiveSkips < maxConsecutiveSkips) {
             try {
                 // STEP 1: Acquire mutex, advance index, decide action
                 var photoToLoad: Photo? = null
@@ -421,11 +421,12 @@ class PhotoBufferManager @Inject constructor(
                     photo // non-null = proceed to load
                 }
 
-                // Blacklisted skip — free, doesn't count as retry
+                // Blacklisted/offline skip — free, doesn't count as retry
                 if (earlyResult == null) {
-                    totalSkips++
+                    consecutiveSkips++
                     continue
                 }
+                consecutiveSkips = 0 // Reset once we attempt a real load
 
                 val photo = photoToLoad!!
 
@@ -502,13 +503,13 @@ class PhotoBufferManager @Inject constructor(
         val timeoutPerAttempt = (displayIntervalMs / 2).coerceAtLeast(2_000L)
 
         // maxRetries counts only real I/O failures (timeout, decode error).
-        // Blacklisted skips are free (instant) and don't count.
+        // Blacklisted/offline-SMB skips are free (instant) and don't count.
         val maxRetries = 3
         var retriesSoFar = 0
-        var totalSkips = 0
-        val maxSkips = mutex.withLock { photos.size }
+        var consecutiveSkips = 0
+        val maxConsecutiveSkips = mutex.withLock { photos.size + 1 }
 
-        while (retriesSoFar < maxRetries && totalSkips < maxSkips) {
+        while (retriesSoFar < maxRetries && consecutiveSkips < maxConsecutiveSkips) {
             try {
                 // STEP 1: Acquire mutex, advance index backward, decide action
                 var photoToLoad: Photo? = null
@@ -557,11 +558,12 @@ class PhotoBufferManager @Inject constructor(
                     photo // non-null = proceed to load
                 }
 
-                // Blacklisted skip — free, doesn't count as retry
+                // Blacklisted/offline skip — free, doesn't count as retry
                 if (earlyResult == null) {
-                    totalSkips++
+                    consecutiveSkips++
                     continue
                 }
+                consecutiveSkips = 0
 
                 val photo = photoToLoad!!
 
