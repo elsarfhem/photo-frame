@@ -824,6 +824,23 @@ class PhotoBufferManager @Inject constructor(
     }
 
     /**
+     * Removes SMB entries from the blacklist so the next photo load retries them.
+     * Called on network recovery: previously unreachable SMB photos may now work.
+     *
+     * Thread Safety: Uses synchronized access on the set.
+     */
+    fun clearSmbBlacklist() {
+        synchronized(blacklistedPaths) {
+            val before = blacklistedPaths.size
+            blacklistedPaths.removeAll { it.startsWith("smb://") }
+            val removed = before - blacklistedPaths.size
+            if (removed > 0) {
+                Log.d(TAG, "Cleared $removed SMB entries from blacklist on network recovery")
+            }
+        }
+    }
+
+    /**
      * Reduces buffer to minimum size (keeps only current photo).
      * Used during memory pressure for graceful degradation.
      *
