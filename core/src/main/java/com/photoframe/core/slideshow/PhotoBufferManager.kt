@@ -6,6 +6,7 @@ import com.photoframe.core.di.IoDispatcher
 import com.photoframe.core.image.ImageCache
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.Result
+import com.photoframe.core.network.NetworkMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,7 @@ import javax.inject.Singleton
 @Singleton
 class PhotoBufferManager @Inject constructor(
     private val imageCache: ImageCache,
+    private val networkMonitor: NetworkMonitor,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     private val mutex = Mutex()
@@ -128,12 +130,23 @@ class PhotoBufferManager @Inject constructor(
         }
 
         // STEP 2: Load initial photo WITHOUT holding mutex (up to 5s I/O)
-        // Try up to 3 photos — skip slow/broken ones to avoid stuck init
-        val maxInitAttempts = 3.coerceAtMost(photoList.size)
+        // Try up to 3 photos — skip slow/broken ones to avoid stuck init.
+        // When offline, scan further to find a local photo before giving up.
+        val maxInitAttempts = if (networkMonitor.isNetworkAvailable.value) {
+            3.coerceAtMost(photoList.size)
+        } else {
+            photoList.size
+        }
         var loaded = false
 
         for (attempt in 0 until maxInitAttempts) {
             val photo = mutex.withLock { photos[currentIndex] }
+
+            // Offline: skip SMB photos instantly (would fail anyway, waste timeout budget)
+            if (!networkMonitor.isNetworkAvailable.value && photo.path.startsWith("smb://")) {
+                mutex.withLock { currentIndex = (currentIndex + 1) % photos.size }
+                continue
+            }
 
             if (photo.isVideo) {
                 Log.d(TAG, "initialize: Current item is video, skipping bitmap load: ${photo.fileName}")
@@ -381,6 +394,11 @@ class PhotoBufferManager @Inject constructor(
                         return@withLock null // signal: skip to next iteration
                     }
 
+                    // Skip SMB paths when offline (avoid wasted timeout on unreachable host)
+                    if (!networkMonitor.isNetworkAvailable.value && photo.path.startsWith("smb://")) {
+                        return@withLock null // signal: skip to next iteration
+                    }
+
                     // Handle videos immediately
                     if (photo.isVideo) {
                         Log.d(TAG, "getNextPhoto: Video detected, skipping bitmap load: ${photo.fileName}")
@@ -509,6 +527,11 @@ class PhotoBufferManager @Inject constructor(
                     // Skip blacklisted paths instantly (no timeout wasted)
                     if (blacklistedPaths.contains(photo.path)) {
                         Log.d(TAG, "getPreviousPhoto: Skipping blacklisted ${photo.fileName}")
+                        return@withLock null // signal: skip to next iteration
+                    }
+
+                    // Skip SMB paths when offline (avoid wasted timeout on unreachable host)
+                    if (!networkMonitor.isNetworkAvailable.value && photo.path.startsWith("smb://")) {
                         return@withLock null // signal: skip to next iteration
                     }
 

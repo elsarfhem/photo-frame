@@ -181,9 +181,10 @@ object CoreModule {
     @Singleton
     fun providePhotoBufferManager(
         imageCache: ImageCache,
+        networkMonitor: com.photoframe.core.network.NetworkMonitor,
         @IoDispatcher ioDispatcher: CoroutineDispatcher
     ): PhotoBufferManager {
-        return PhotoBufferManager(imageCache, ioDispatcher)
+        return PhotoBufferManager(imageCache, networkMonitor, ioDispatcher)
     }
 
     @Provides
