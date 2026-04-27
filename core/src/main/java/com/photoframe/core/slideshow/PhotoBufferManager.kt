@@ -129,14 +129,11 @@ class PhotoBufferManager @Inject constructor(
             }
         }
 
-        // STEP 2: Load initial photo WITHOUT holding mutex (up to 5s I/O)
-        // Try up to 3 photos — skip slow/broken ones to avoid stuck init.
-        // When offline, scan further to find a local photo before giving up.
-        val maxInitAttempts = if (networkMonitor.isNetworkAvailable.value) {
-            3.coerceAtMost(photoList.size)
-        } else {
-            photoList.size
-        }
+        // STEP 2: Load initial photo WITHOUT holding mutex (up to 5s I/O).
+        // Walk the whole list — unreachable SMB photos blacklist fast (or skip instantly
+        // when offline), so exhausting the cap on a mixed local+SMB library was the real
+        // failure mode. Cap still exists to guarantee termination if every path fails.
+        val maxInitAttempts = photoList.size
         var loaded = false
 
         for (attempt in 0 until maxInitAttempts) {
