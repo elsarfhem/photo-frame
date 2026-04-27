@@ -1,9 +1,12 @@
 package com.photoframe.core.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.photoframe.core.di.IoDispatcher
@@ -23,7 +26,11 @@ import javax.inject.Singleton
 
 // DataStore extension
 private val Context.photoSourcesDataStore: DataStore<Preferences> by preferencesDataStore(
-    name = "photo_sources"
+    name = "photo_sources",
+    corruptionHandler = ReplaceFileCorruptionHandler {
+        Log.e("PhotoSourcesDataStore", "Corrupted preferences proto, resetting to defaults", it)
+        emptyPreferences()
+    }
 )
 
 /**

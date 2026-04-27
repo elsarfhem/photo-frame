@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!-- Exclude DataStore preferences (contains SMB credentials) from backup -->
-    <exclude domain="sharedpref" path="datastore"/>
+    <!-- Exclude DataStore preferences (credentials + configs) and Room cache — restoring stale
+         or mismatched copies causes proto parse crashes and "no photos found" on fresh installs. -->
+    <exclude domain="file" path="datastore/"/>
+    <exclude domain="database" path="photo_database"/>
+    <exclude domain="database" path="photo_database-shm"/>
+    <exclude domain="database" path="photo_database-wal"/>
 </full-backup-content>
