@@ -168,6 +168,11 @@ class SlideshowViewModel @Inject constructor(
                     photoRotationStore.getRotation(metadata.path)
                 } else 0
 
+                android.util.Log.d(
+                    "SlideshowOverlay",
+                    "VM emit idx=$photoIndex bitmap=${currentPhoto?.hashCode()} metaFile=${metadata?.fileName} metaPath=${metadata?.path}"
+                )
+
                 _state.update { it.copy(
                     currentPhoto = currentPhoto,
                     currentPhotoMetadata = metadata,
