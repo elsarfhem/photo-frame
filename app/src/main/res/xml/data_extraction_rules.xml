@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Exclude DataStore preferences (contains encrypted SMB credentials) from cloud backup -->
-        <exclude domain="sharedpref" path="datastore"/>
+        <!-- DataStore preferences live under files/datastore/, not shared_prefs. -->
+        <exclude domain="file" path="datastore/"/>
+        <exclude domain="database" path="photo_database"/>
+        <exclude domain="database" path="photo_database-shm"/>
+        <exclude domain="database" path="photo_database-wal"/>
     </cloud-backup>
     <device-transfer>
-        <!-- Exclude DataStore preferences from device transfer -->
-        <exclude domain="sharedpref" path="datastore"/>
+        <exclude domain="file" path="datastore/"/>
+        <exclude domain="database" path="photo_database"/>
+        <exclude domain="database" path="photo_database-shm"/>
+        <exclude domain="database" path="photo_database-wal"/>
     </device-transfer>
 </data-extraction-rules>

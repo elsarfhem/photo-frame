@@ -4,9 +4,12 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.photoframe.core.model.Result
@@ -40,7 +43,11 @@ class KeystoreCredentialStore(
 ) : CredentialStore {
 
     private val Context.credentialDataStore: DataStore<Preferences> by preferencesDataStore(
-        name = DATASTORE_NAME
+        name = DATASTORE_NAME,
+        corruptionHandler = ReplaceFileCorruptionHandler {
+            Log.e("CredentialDataStore", "Corrupted preferences proto, resetting to defaults", it)
+            emptyPreferences()
+        }
     )
 
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply {
