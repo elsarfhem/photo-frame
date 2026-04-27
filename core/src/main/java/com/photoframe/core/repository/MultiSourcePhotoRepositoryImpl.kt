@@ -488,8 +488,13 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
             when (result) {
                 is Result.Success -> {
                     currentIndex = photoBufferManager.getCurrentIndex()
+                    val newMeta = currentPhotos.getOrNull(currentIndex)
+                    android.util.Log.d(
+                        "SlideshowOverlay",
+                        "Repo nextPhoto idx=$currentIndex bitmap=${result.data?.hashCode()} metaFile=${newMeta?.fileName} metaPath=${newMeta?.path}"
+                    )
                     _currentPhoto.value = result.data
-                    _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
+                    _currentPhotoMetadata.value = newMeta
                     _currentPhotoIndex.value = currentIndex
                     _error.value = null
                     Result.success(result.data)
@@ -527,8 +532,13 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
             when (result) {
                 is Result.Success -> {
                     currentIndex = photoBufferManager.getCurrentIndex()
+                    val newMeta = currentPhotos.getOrNull(currentIndex)
+                    android.util.Log.d(
+                        "SlideshowOverlay",
+                        "Repo previousPhoto idx=$currentIndex bitmap=${result.data?.hashCode()} metaFile=${newMeta?.fileName} metaPath=${newMeta?.path}"
+                    )
                     _currentPhoto.value = result.data
-                    _currentPhotoMetadata.value = currentPhotos.getOrNull(currentIndex)
+                    _currentPhotoMetadata.value = newMeta
                     _currentPhotoIndex.value = currentIndex
                     _error.value = null
                     Result.success(result.data)
