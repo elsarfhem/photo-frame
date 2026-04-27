@@ -242,6 +242,35 @@ class SlideshowViewModel @Inject constructor(
             }
         }
 
+        // Observe source list changes and reload photos when sources are added/removed/toggled
+        viewModelScope.launch {
+            var lastSignature: String? = null
+            photoSourcesManager.sources.collect { sources ->
+                // Signature captures id + enabled state + config hash so we also react to edits
+                val signature = sources
+                    .sortedBy { it.id }
+                    .joinToString("|") { "${it.id}:${it.isEnabled}:${it.config.hashCode()}" }
+
+                if (lastSignature == null) {
+                    lastSignature = signature
+                    return@collect
+                }
+
+                if (signature != lastSignature) {
+                    lastSignature = signature
+                    if (isInitialized) {
+                        android.util.Log.d("SlideshowViewModel", "Source list changed, reloading photos")
+                        val shuffleEnabled = (settingsRepository.loadSlideshowSettings() as? Result.Success)
+                            ?.data?.shuffleEnabled ?: false
+                        val wasPlaying = _state.value.isPlaying
+                        pause()
+                        photoBufferManager.clear()
+                        initialize(shuffleEnabled = shuffleEnabled, autoPlay = wasPlaying)
+                    }
+                }
+            }
+        }
+
         // Monitor buffer state (for debugging)
         viewModelScope.launch {
             photoBufferManager.loadingState.collect { loadingState ->
