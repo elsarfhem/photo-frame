@@ -206,9 +206,10 @@ object CoreModule {
         smbClient: SmbClient,
         credentialStore: CredentialStore,
         networkMonitor: com.photoframe.core.network.NetworkMonitor,
+        appLogger: AppLogger,
         @IoDispatcher ioDispatcher: CoroutineDispatcher
     ): MultiSourcePhotoRepositoryImpl {
-        return MultiSourcePhotoRepositoryImpl(photoSourcesManager, photoSourceFactory, photoBufferManager, photoDao, smbClient, credentialStore, networkMonitor, ioDispatcher)
+        return MultiSourcePhotoRepositoryImpl(photoSourcesManager, photoSourceFactory, photoBufferManager, photoDao, smbClient, credentialStore, networkMonitor, appLogger, ioDispatcher)
     }
 
     @Provides
