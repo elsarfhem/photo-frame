@@ -7,6 +7,7 @@ import com.photoframe.core.database.PhotoDao
 import com.photoframe.core.database.toEntity
 import com.photoframe.core.database.toPhoto
 import com.photoframe.core.di.IoDispatcher
+import com.photoframe.core.logging.AppLogger
 import com.photoframe.core.model.Photo
 import com.photoframe.core.model.PhotoSourceConfig
 import com.photoframe.core.model.PhotoSourceType
@@ -67,6 +68,7 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
     private val smbClient: SmbClient,
     private val credentialStore: CredentialStore,
     private val networkMonitor: NetworkMonitor,
+    private val appLogger: AppLogger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : MultiSourcePhotoRepository {
 
@@ -489,9 +491,9 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 is Result.Success -> {
                     currentIndex = photoBufferManager.getCurrentIndex()
                     val newMeta = currentPhotos.getOrNull(currentIndex)
-                    android.util.Log.d(
-                        "SlideshowOverlay",
-                        "Repo nextPhoto idx=$currentIndex bitmap=${result.data?.hashCode()} metaFile=${newMeta?.fileName} metaPath=${newMeta?.path}"
+                    appLogger.log(
+                        "PHOTO_NEXT",
+                        "idx=$currentIndex bmp=${result.data?.hashCode()} file=${newMeta?.fileName} path=${newMeta?.path}"
                     )
                     _currentPhoto.value = result.data
                     _currentPhotoMetadata.value = newMeta
@@ -533,9 +535,9 @@ class MultiSourcePhotoRepositoryImpl @Inject constructor(
                 is Result.Success -> {
                     currentIndex = photoBufferManager.getCurrentIndex()
                     val newMeta = currentPhotos.getOrNull(currentIndex)
-                    android.util.Log.d(
-                        "SlideshowOverlay",
-                        "Repo previousPhoto idx=$currentIndex bitmap=${result.data?.hashCode()} metaFile=${newMeta?.fileName} metaPath=${newMeta?.path}"
+                    appLogger.log(
+                        "PHOTO_PREV",
+                        "idx=$currentIndex bmp=${result.data?.hashCode()} file=${newMeta?.fileName} path=${newMeta?.path}"
                     )
                     _currentPhoto.value = result.data
                     _currentPhotoMetadata.value = newMeta

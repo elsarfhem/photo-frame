@@ -697,10 +697,6 @@ private fun ControlOverlay(
         ) {
             // Photo/video metadata info
             if (photoMetadata != null) {
-                android.util.Log.d(
-                    "SlideshowOverlay",
-                    "idx=$photoIndex fileName=${photoMetadata.fileName} path=${photoMetadata.path}"
-                )
                 Text(
                     text = photoMetadata.fileName,
                     style = MaterialTheme.typography.bodySmall,
@@ -710,7 +706,6 @@ private fun ControlOverlay(
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
                 val folderDisplay = photoMetadata.path.substringBeforeLast('/').removePrefix("smb://")
-                android.util.Log.d("SlideshowOverlay", "folderDisplay=$folderDisplay")
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 32.dp)
