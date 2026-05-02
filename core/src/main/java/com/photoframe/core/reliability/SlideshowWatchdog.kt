@@ -59,6 +59,9 @@ class SlideshowWatchdog : Service() {
     @Inject
     lateinit var telemetryLogger: TelemetryLogger
 
+    @Inject
+    lateinit var recoveryBus: SlideshowRecoveryBus
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var monitoringJob: Job? = null
 
@@ -205,18 +208,21 @@ class SlideshowWatchdog : Service() {
                 return
             }
 
-            // Second attempt: Reload entire slideshow
-            android.util.Log.w(TAG, "Advance failed, attempting full slideshow reload")
-            telemetryLogger.logBreadcrumb("Watchdog: advance failed, attempting full reload")
+            // Second attempt: Reload entire slideshow via recovery bus → ViewModel
+            val errorMsg = if (result is com.photoframe.core.model.Result.Error) {
+                result.message ?: result.exception?.message ?: "unknown"
+            } else "non-success"
+            android.util.Log.w(TAG, "Advance failed ($errorMsg), requesting full slideshow reload")
+            telemetryLogger.logBreadcrumb("Watchdog: advance failed ($errorMsg), requesting full reload")
+            appLogger.log("WATCHDOG_RELOAD_REQUESTED", errorMsg)
 
-            // Note: Full reload requires coordination with ViewModel
-            // For now, just reset tracking and let user/app handle it
+            // Reset tracking so the next monitoring tick doesn't immediately re-fire.
             lastPhotoChangeTime = System.currentTimeMillis()
-            _watchdogState.value = WatchdogState.Failed
+            _watchdogState.value = WatchdogState.Recovering
 
-            // TODO: Send broadcast to MainActivity to trigger reload
-            val intent = Intent(ACTION_SLIDESHOW_STALLED)
-            sendBroadcast(intent)
+            // Ask the ViewModel to reinitialize the slideshow (reload photos, reset buffer).
+            // This path replaces the dead ACTION_SLIDESHOW_STALLED broadcast.
+            recoveryBus.emit(RecoveryEvent.FullReloadRequested)
 
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to recover stalled slideshow", e)

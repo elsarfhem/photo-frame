@@ -14,6 +14,8 @@ import com.photoframe.core.network.NetworkMonitor
 import com.photoframe.core.reliability.CrashHandler
 import com.photoframe.core.reliability.MemoryMonitor
 import com.photoframe.core.reliability.MemoryState
+import com.photoframe.core.reliability.RecoveryEvent
+import com.photoframe.core.reliability.SlideshowRecoveryBus
 import com.photoframe.core.reliability.SlideshowWatchdog
 import com.photoframe.core.repository.PhotoRotationStore
 import com.photoframe.core.repository.SettingsRepository
@@ -80,7 +82,8 @@ class SlideshowViewModel @Inject constructor(
     private val crashHandler: CrashHandler,
     private val telemetryLogger: TelemetryLogger,
     private val photoRotationStore: PhotoRotationStore,
-    private val appLogger: AppLogger
+    private val appLogger: AppLogger,
+    private val recoveryBus: SlideshowRecoveryBus
 ) : ViewModel() {
 
     // UI state
@@ -119,6 +122,28 @@ class SlideshowViewModel @Inject constructor(
     private var lastSuccessfulAdvanceMs: Long = 0L
 
     init {
+        // Observe watchdog recovery requests — fires when nextPhoto() repeatedly fails
+        // and the dead ACTION_SLIDESHOW_STALLED broadcast can no longer escalate.
+        viewModelScope.launch {
+            recoveryBus.events.collect { event ->
+                when (event) {
+                    is RecoveryEvent.FullReloadRequested -> {
+                        android.util.Log.w(
+                            "SlideshowViewModel",
+                            "Watchdog requested full reload — reinitializing slideshow"
+                        )
+                        appLogger.log("WATCHDOG_RELOAD_TRIGGERED")
+                        val shuffle = (settingsRepository.loadSlideshowSettings() as? Result.Success)
+                            ?.data?.shuffleEnabled ?: false
+                        val wasPlaying = _state.value.isPlaying
+                        pause()
+                        photoBufferManager.clear()
+                        initialize(shuffleEnabled = shuffle, autoPlay = wasPlaying, isRetry = true)
+                    }
+                }
+            }
+        }
+
         // Phase 4: Monitor network state for auto-recovery
         viewModelScope.launch {
             networkMonitor.isNetworkAvailable.collect { isAvailable ->
