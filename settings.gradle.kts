@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "PhotoFrame"
 include(":app")
 include(":core")
+include(":tests")
