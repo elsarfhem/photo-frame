@@ -7,7 +7,7 @@
 - Launch: `adb -s emulator-5556 shell am start -n com.photoframe.app/.MainActivity`
 - Logs: `adb -s emulator-5556 logcat | grep -E "SlideshowScreen|PanTransition|PhotoFrame"`
 - Release bundle: `./gradlew bundleRelease` (output: `app/build/outputs/bundle/release/app-release.aab`)
-- Tests are disabled (`core/build.gradle.kts` disables test compilation tasks)
+- Tests: `./gradlew :core:testDebugUnitTest :tests:testDebugUnitTest` (CI runs these on every PR)
 
 ## Build Stack
 
@@ -18,6 +18,7 @@ Compose BOM 2024.09.00 | Firebase BOM 33.8.0 | Hilt 2.59.2 | Room 2.7.2 | axion-
 
 - **app/**: UI layer (Compose), ViewModels, navigation, transitions
 - **core/**: Domain models, repositories, data sources, SMB client, Room DB
+- **tests/**: Cross-module functional/integration tests (no Android runtime dependency)
 - MVVM + Hilt DI + Repository pattern + StateFlow
 - SMB photo loading with local caching (Coil 3 + jcifs-ng)
 - Navigation: NavHost with type-safe @Serializable routes (Nav Compose 2.8.x)
