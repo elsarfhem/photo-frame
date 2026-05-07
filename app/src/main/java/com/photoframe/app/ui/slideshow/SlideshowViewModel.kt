@@ -112,6 +112,11 @@ class SlideshowViewModel @Inject constructor(
     // Initialization flag to filter transient errors during startup
     private var isInitialized = false
 
+    // Set when a watchdog-driven reload bails out because the network gate
+    // is closed (SMB-only + offline). Consumed on NETWORK_RECOVERED to retry
+    // initialize() with autoPlay, otherwise the slideshow stays paused forever.
+    private var pendingRecoveryReload = false
+
     // In-process watchdog
     private var watchdogJob: Job? = null
 
@@ -369,8 +374,13 @@ class SlideshowViewModel @Inject constructor(
                 // Mobile networks can be unstable — previously failed SMB photos should load again.
                 photoBufferManager.clearSmbBlacklist()
 
-                // Check if recovery is needed BEFORE clearing the error
-                val needsRecovery = isInitialized && _state.value.totalPhotos == 0
+                // Check if recovery is needed BEFORE clearing the error.
+                // Two paths trigger recovery:
+                //   1. Cold-start case: we have no photos at all.
+                //   2. Pending watchdog reload: previous initialize() bailed on
+                //      the network gate while the slideshow was playing.
+                val needsRecovery = isInitialized &&
+                    (_state.value.totalPhotos == 0 || pendingRecoveryReload)
 
                 // Clear network-related errors
                 _state.update { currentState ->
@@ -385,7 +395,19 @@ class SlideshowViewModel @Inject constructor(
                 // P0 PART 3: Auto-retry initialize() if we had no photos at startup
                 // This fixes the scenario: network unavailable at boot → error shown → network comes back later
                 if (needsRecovery) {
-                    android.util.Log.i("SlideshowViewModel", "Network restored with no photos loaded, auto-retrying initialize()")
+                    val wasPending = pendingRecoveryReload
+                    pendingRecoveryReload = false
+                    android.util.Log.i(
+                        "SlideshowViewModel",
+                        if (wasPending)
+                            "Network restored, resuming pending watchdog reload"
+                        else
+                            "Network restored with no photos loaded, auto-retrying initialize()"
+                    )
+                    appLogger.log(
+                        "NETWORK_RECOVERY_RELOAD",
+                        if (wasPending) "pendingReload" else "coldStart"
+                    )
                     initialize(shuffleEnabled = false, autoPlay = true, isRetry = true)
                 }
             }
@@ -517,6 +539,12 @@ class SlideshowViewModel @Inject constructor(
                             isRetrying = false,
                             error = "Network not available after retries"
                         ) }
+                        // Remember autoPlay intent so NETWORK_RECOVERED can resume
+                        // the slideshow after a watchdog-driven reload that hit
+                        // the offline gate (Doze wake / transient disconnect).
+                        if (autoPlay) {
+                            pendingRecoveryReload = true
+                        }
                         initializationTimeoutJob?.cancel()
                         return@launch
                     }
@@ -534,6 +562,9 @@ class SlideshowViewModel @Inject constructor(
                             isRetrying = false,
                             error = null
                         ) }
+
+                        // Init succeeded — discard any stale pending-reload request
+                        pendingRecoveryReload = false
 
                         // Cancel timeout watchdog on success
                         initializationTimeoutJob?.cancel()
