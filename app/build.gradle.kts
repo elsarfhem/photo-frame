@@ -28,12 +28,12 @@ println("Building Easy Photo Frame v${appVersionName} (${appVersionCode})")
 
 android {
     namespace = "com.photoframe.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.photoframe.app"
         minSdk = 23
-        targetSdk = 35
+        targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
 

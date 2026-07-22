@@ -46,7 +46,7 @@ val releaseVersion = scmVersion.version
 project.version = releaseVersion
 
 // Calculate versionCode from git commit count (auto-increments with every commit)
-// Offset ensures it's higher than any previously uploaded version code (10070 on Play Console)
+// Offset ensures it's higher than any previously uploaded version code (10080 on Play Console)
 fun gitCommitCount(): Int {
     val process = ProcessBuilder("git", "rev-list", "--count", "HEAD")
         .directory(projectDir)
@@ -54,7 +54,7 @@ fun gitCommitCount(): Int {
         .start()
     val count = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 0
     process.waitFor()
-    return count + 10001
+    return count + 10011
 }
 
 // Make version info available to app module

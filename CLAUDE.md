@@ -11,7 +11,7 @@
 
 ## Build Stack
 
-AGP 9.1.0 | Kotlin 2.2.10 | KSP 2.3.6 | Gradle 9.3.1 | JDK 21 | minSdk 23 | compileSdk 35
+AGP 9.1.0 | Kotlin 2.2.10 | KSP 2.3.6 | Gradle 9.3.1 | JDK 21 | minSdk 23 | compileSdk 36
 Compose BOM 2024.09.00 | Firebase BOM 33.8.0 | Hilt 2.59.2 | Room 2.7.2 | axion-release 1.21.1
 
 ## Architecture
