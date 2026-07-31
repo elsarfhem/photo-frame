@@ -47,6 +47,12 @@ class PhotoSourceFactory @Inject constructor(
                 is SourceConfig.LocalConfig -> {
                     createLocalSource(config.id, config.displayName, config.isEnabled, sourceConfig)
                 }
+                is SourceConfig.SampleConfig -> {
+                    Result.error(
+                        IllegalStateException("Sample source creation not yet implemented"),
+                        "Sample source creation not yet implemented"
+                    )
+                }
             }
         } catch (e: Exception) {
             Result.error(
