@@ -46,4 +46,15 @@ class PhotoSourceConfigTest {
         )
         assertEquals(false, disabled.isEnabled)
     }
+
+    @Test
+    fun `createSample wires SAMPLE type and SampleConfig`() {
+        val config = PhotoSourceConfig.createSample(
+            id = "sample-1",
+            displayName = "Sample Photos"
+        )
+        assertEquals(PhotoSourceType.SAMPLE, config.type)
+        assertTrue(config.isEnabled)
+        assertTrue(config.config is SourceConfig.SampleConfig)
+    }
 }

@@ -185,7 +185,7 @@ class SettingsViewModelTest {
 
     @Test
     fun `testConnection fails with invalid credentials`() = runTest {
-        coEvery { smbClient.testConnection(any(), any()) } returns Result.Error("Connection failed")
+        coEvery { smbClient.testConnection(any(), any()) } returns Result.Error(Exception("Connection failed"))
 
         viewModel = SettingsViewModel(settingsRepository, smbClient)
         testDispatcher.scheduler.advanceUntilIdle()

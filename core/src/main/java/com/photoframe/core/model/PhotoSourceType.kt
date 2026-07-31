@@ -21,7 +21,13 @@ enum class PhotoSourceType(val displayName: String) {
      * Local device storage source.
      * Uses MediaStore API with scoped storage.
      */
-    LOCAL("Local Storage")
+    LOCAL("Local Storage"),
+
+    /**
+     * Sample/demo source.
+     * Bundled sample photos for demo/testing without real network setup.
+     */
+    SAMPLE("Sample Photos")
 
     // Future: GOOGLE_DRIVE, DROPBOX, FTP, etc.
 }

@@ -75,6 +75,42 @@ class SourcesViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isSaving = true, error = null) }
 
+            // "demo" as the server field bypasses real SMB setup entirely and
+            // adds a bundled sample-photo source instead. Other SMB fields are ignored.
+            if (server.trim().equals("demo", ignoreCase = true)) {
+                val sourceId = "sample-${System.currentTimeMillis()}"
+                val sourceConfig = PhotoSourceConfig.createSample(
+                    id = sourceId,
+                    displayName = displayName.ifBlank { "Sample Photos" }
+                )
+
+                val result = multiSourceRepository.addPhotoSource(sourceConfig)
+
+                when (result) {
+                    is Result.Success -> {
+                        _state.update {
+                            it.copy(
+                                isSaving = false,
+                                showAddDialog = false,
+                                successMessage = "Source added successfully"
+                            )
+                        }
+                    }
+                    is Result.Error -> {
+                        _state.update {
+                            it.copy(
+                                isSaving = false,
+                                error = result.message ?: "Failed to add source"
+                            )
+                        }
+                    }
+                    is Result.Loading -> {
+                        // Should not happen
+                    }
+                }
+                return@launch
+            }
+
             // Validate required fields
             val validationError = when {
                 server.isBlank() -> "Server is required"

@@ -258,6 +258,7 @@ private fun SourceCard(
                         imageVector = when (source.type) {
                             PhotoSourceType.SMB -> Icons.Default.Cloud
                             PhotoSourceType.LOCAL -> Icons.Default.Smartphone
+                            PhotoSourceType.SAMPLE -> Icons.Default.PhotoLibrary
                         },
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
@@ -311,11 +312,13 @@ private fun SourceCard(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Edit button
-                    TextButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Edit")
+                    // Edit button - sample source has no user-editable fields
+                    if (source.type != PhotoSourceType.SAMPLE) {
+                        TextButton(onClick = onEdit) {
+                            Icon(Icons.Default.Edit, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit")
+                        }
                     }
 
                     // Remove button
@@ -350,6 +353,9 @@ private fun SourceDetails(source: PhotoSourceConfig) {
             }
             is com.photoframe.core.model.SourceConfig.LocalConfig -> {
                 DetailRow("Folders", "${config.folderUris.size} selected")
+            }
+            is com.photoframe.core.model.SourceConfig.SampleConfig -> {
+                DetailRow("Content", "Bundled sample photos")
             }
         }
     }

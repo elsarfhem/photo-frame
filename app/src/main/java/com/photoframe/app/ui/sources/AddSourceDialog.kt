@@ -91,6 +91,10 @@ fun AddSourceDialog(
                             onCancel = onDismiss
                         )
                     }
+                    PhotoSourceType.SAMPLE -> {
+                        // Not user-selectable: sample sources are created via the
+                        // "demo" server trigger in SmbSourceForm, never chosen directly.
+                    }
                 }
             }
         },
@@ -262,6 +266,7 @@ private fun SmbSourceForm(
 
             Spacer(Modifier.width(8.dp))
 
+            val isDemoTrigger = server.trim().equals("demo", ignoreCase = true)
             Button(
                 onClick = {
                     onAdd(
@@ -274,7 +279,8 @@ private fun SmbSourceForm(
                         password
                     )
                 },
-                enabled = !isSaving && server.isNotBlank() && share.isNotBlank() && username.isNotBlank() && password.isNotBlank()
+                enabled = !isSaving && server.isNotBlank() &&
+                    (isDemoTrigger || (share.isNotBlank() && username.isNotBlank() && password.isNotBlank()))
             ) {
                 if (isSaving) {
                     CircularProgressIndicator(
