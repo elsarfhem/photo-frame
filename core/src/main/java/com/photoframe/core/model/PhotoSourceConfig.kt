@@ -92,6 +92,31 @@ data class PhotoSourceConfig(
                 )
             )
         }
+
+        /**
+         * Creates a new sample/demo source configuration.
+         *
+         * Bypasses real SMB setup: the resulting source serves bundled
+         * sample photos with no network or credentials required.
+         *
+         * @param id Unique ID for this source
+         * @param displayName Display name
+         * @param isEnabled Whether enabled
+         * @return PhotoSourceConfig for sample/demo content
+         */
+        fun createSample(
+            id: String,
+            displayName: String,
+            isEnabled: Boolean = true
+        ): PhotoSourceConfig {
+            return PhotoSourceConfig(
+                id = id,
+                type = PhotoSourceType.SAMPLE,
+                displayName = displayName,
+                isEnabled = isEnabled,
+                config = SourceConfig.SampleConfig
+            )
+        }
     }
 }
 
@@ -144,6 +169,14 @@ sealed class SourceConfig {
     data class LocalConfig(
         val folderUris: List<String>
     ) : SourceConfig()
+
+    /**
+     * Configuration for the bundled sample/demo source.
+     *
+     * No fields: photos are bundled app assets, not user-configured.
+     */
+    @Serializable
+    object SampleConfig : SourceConfig()
 
     // Future: GoogleDriveConfig, DropboxConfig, FtpConfig, etc.
 }
