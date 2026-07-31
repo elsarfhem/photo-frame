@@ -77,6 +77,7 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
+    // Unmocked Android framework calls (e.g. Log) return defaults instead of throwing — same as core/build.gradle.kts
     testOptions {
         unitTests.isReturnDefaultValues = true
     }

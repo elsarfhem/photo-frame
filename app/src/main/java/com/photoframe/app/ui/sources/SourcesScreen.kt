@@ -344,16 +344,14 @@ private fun SourceCard(
 @Composable
 private fun SourceDetails(source: PhotoSourceConfig) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        when (source.config) {
+        when (val config = source.config) {
             is com.photoframe.core.model.SourceConfig.SmbConfig -> {
-                val config = source.config as com.photoframe.core.model.SourceConfig.SmbConfig
                 DetailRow("Server", config.server)
                 DetailRow("Share", config.share)
                 DetailRow("Path", config.path)
                 DetailRow("Username", config.username)
             }
             is com.photoframe.core.model.SourceConfig.LocalConfig -> {
-                val config = source.config as com.photoframe.core.model.SourceConfig.LocalConfig
                 DetailRow("Folders", "${config.folderUris.size} selected")
             }
             is com.photoframe.core.model.SourceConfig.SampleConfig -> {
