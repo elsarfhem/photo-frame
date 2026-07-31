@@ -76,6 +76,7 @@ fun EditSourceDialog(
                         imageVector = when (source.type) {
                             PhotoSourceType.SMB -> Icons.Default.Cloud
                             PhotoSourceType.LOCAL -> Icons.Default.Smartphone
+                            PhotoSourceType.SAMPLE -> Icons.Default.PhotoLibrary
                         },
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
@@ -116,6 +117,12 @@ fun EditSourceDialog(
                             onEdit = onEditLocal,
                             onCancel = onDismiss
                         )
+                    }
+                    PhotoSourceType.SAMPLE -> {
+                        Text("Sample source has no editable settings.")
+                        TextButton(onClick = onDismiss) {
+                            Text("Close")
+                        }
                     }
                 }
             }

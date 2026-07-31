@@ -258,6 +258,7 @@ private fun SourceCard(
                         imageVector = when (source.type) {
                             PhotoSourceType.SMB -> Icons.Default.Cloud
                             PhotoSourceType.LOCAL -> Icons.Default.Smartphone
+                            PhotoSourceType.SAMPLE -> Icons.Default.PhotoLibrary
                         },
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
@@ -311,11 +312,13 @@ private fun SourceCard(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Edit button
-                    TextButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Edit")
+                    // Edit button - sample source has no user-editable fields
+                    if (source.type != PhotoSourceType.SAMPLE) {
+                        TextButton(onClick = onEdit) {
+                            Icon(Icons.Default.Edit, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit")
+                        }
                     }
 
                     // Remove button
@@ -341,15 +344,20 @@ private fun SourceCard(
 @Composable
 private fun SourceDetails(source: PhotoSourceConfig) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        when (val config = source.config) {
+        when (source.config) {
             is com.photoframe.core.model.SourceConfig.SmbConfig -> {
+                val config = source.config as com.photoframe.core.model.SourceConfig.SmbConfig
                 DetailRow("Server", config.server)
                 DetailRow("Share", config.share)
                 DetailRow("Path", config.path)
                 DetailRow("Username", config.username)
             }
             is com.photoframe.core.model.SourceConfig.LocalConfig -> {
+                val config = source.config as com.photoframe.core.model.SourceConfig.LocalConfig
                 DetailRow("Folders", "${config.folderUris.size} selected")
+            }
+            is com.photoframe.core.model.SourceConfig.SampleConfig -> {
+                DetailRow("Content", "Bundled sample photos")
             }
         }
     }

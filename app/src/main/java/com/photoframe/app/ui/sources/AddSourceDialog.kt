@@ -91,6 +91,10 @@ fun AddSourceDialog(
                             onCancel = onDismiss
                         )
                     }
+                    PhotoSourceType.SAMPLE -> {
+                        // Not user-selectable: sample sources are created via the
+                        // "demo" server trigger in SmbSourceForm, never chosen directly.
+                    }
                 }
             }
         },
