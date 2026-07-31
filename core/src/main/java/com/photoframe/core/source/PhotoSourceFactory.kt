@@ -48,10 +48,7 @@ class PhotoSourceFactory @Inject constructor(
                     createLocalSource(config.id, config.displayName, config.isEnabled, sourceConfig)
                 }
                 is SourceConfig.SampleConfig -> {
-                    Result.error(
-                        IllegalStateException("Sample source creation not yet implemented"),
-                        "Sample source creation not yet implemented"
-                    )
+                    createSampleSource(config.id, config.displayName, config.isEnabled)
                 }
             }
         } catch (e: Exception) {
@@ -158,6 +155,28 @@ class PhotoSourceFactory @Inject constructor(
                 "Failed to create local source: ${e.message}"
             )
         }
+    }
+
+    /**
+     * Creates a sample/demo photo source.
+     *
+     * @param id Source ID
+     * @param displayName Display name
+     * @param isEnabled Whether enabled
+     * @return Result with SampleDataPhotoSource
+     */
+    private fun createSampleSource(
+        id: String,
+        displayName: String,
+        isEnabled: Boolean
+    ): Result<PhotoSource> {
+        return Result.success(
+            SampleDataPhotoSource(
+                id = id,
+                displayName = displayName,
+                isEnabled = isEnabled
+            )
+        )
     }
 
     /**
