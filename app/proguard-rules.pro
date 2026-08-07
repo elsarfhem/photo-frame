@@ -5,6 +5,11 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
+# Extra R8 shrink/optimize: flatten package structure and allow member
+# access modification for more aggressive inlining/merging.
+-repackageclasses ''
+-allowaccessmodification
+
 # Keep Hilt generated code
 -keep class dagger.hilt.** { *; }
 -keep class javax.inject.** { *; }
